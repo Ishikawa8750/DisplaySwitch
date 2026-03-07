@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicbarker/clay/main/tauri.schema.json",
+  "productName": "DisplaySwitch",
+  "version": "2.0.0",
+  "identifier": "com.displayswitch.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DisplaySwitch",
+        "width": 960,
+        "height": 740,
+        "resizable": true,
+        "center": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis", "dmg", "app"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "displayswitch_ffi.*"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Ishikawa8750/DisplaySwitch/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  }
+}

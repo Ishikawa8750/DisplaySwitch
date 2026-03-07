@@ -1,5 +1,0 @@
-customtkinter
-pystray
-Pillow
-pywinstyles
-pywin32

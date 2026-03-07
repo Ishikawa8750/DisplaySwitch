@@ -1,0 +1,51 @@
+# ══════════════════════════════════════════════
+# DisplaySwitch .gitignore
+# ══════════════════════════════════════════════
+
+# ── Build artifacts ──
+core_native/build/
+tauri_ui/src-tauri/target/
+tauri_ui/dist/
+
+# ── Native DLL/dylib (built by CI or locally) ──
+tauri_ui/src-tauri/displayswitch_ffi.dll
+tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
+tauri_ui/src-tauri/libdisplayswitch_ffi.so
+
+# ── Dependencies ──
+tauri_ui/node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# ── IDE / Editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── OS generated ──
+Desktop.ini
+ehthumbs.db
+*.lnk
+
+# ── Rust ──
+*.pdb
+*.d
+
+# ── CMake ──
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# ── Tauri auto-generated schemas (recreated on build) ──
+tauri_ui/src-tauri/gen/schemas/
+
+# ── Logs ──
+*.log
+npm-debug.log*
