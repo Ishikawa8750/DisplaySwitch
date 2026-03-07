@@ -27,6 +27,7 @@ extern "C" {
 #include <cstring>
 #include <thread>
 #include <chrono>
+#include <dlfcn.h>
 
 namespace displayswitch {
 
@@ -56,6 +57,48 @@ static std::string manufacturer_from_id(uint32_t vendor) {
     id[2] = static_cast<char>(((vendor)       & 0x1F) + 'A' - 1);
     id[3] = '\0';
     return std::string(id);
+}
+
+// ─── Private API resolution (Apple Silicon DDC/CI + DisplayServices brightness) ──
+
+typedef IOReturn (*IOAVServiceWriteI2C_fn)(io_service_t service, uint32_t chipAddress,
+                                            uint32_t dataAddress, void *inputBuffer,
+                                            uint32_t inputBufferSize);
+typedef IOReturn (*IOAVServiceReadI2C_fn)(io_service_t service, uint32_t chipAddress,
+                                           uint32_t dataAddress, void *outputBuffer,
+                                           uint32_t outputBufferSize);
+
+static IOAVServiceWriteI2C_fn g_IOAVServiceWriteI2C = nullptr;
+static IOAVServiceReadI2C_fn g_IOAVServiceReadI2C = nullptr;
+
+typedef int (*DSGetBrightness_fn)(CGDirectDisplayID display, float *brightness);
+typedef int (*DSSetBrightness_fn)(CGDirectDisplayID display, float brightness);
+
+static DSGetBrightness_fn g_DSGetBrightness = nullptr;
+static DSSetBrightness_fn g_DSSetBrightness = nullptr;
+
+static bool g_private_apis_resolved = false;
+
+static void resolve_private_apis() {
+    if (g_private_apis_resolved) return;
+    g_private_apis_resolved = true;
+
+    void *iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
+    if (iokit) {
+        g_IOAVServiceWriteI2C = (IOAVServiceWriteI2C_fn)dlsym(iokit, "IOAVServiceWriteI2C");
+        g_IOAVServiceReadI2C = (IOAVServiceReadI2C_fn)dlsym(iokit, "IOAVServiceReadI2C");
+    }
+
+    void *ds = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY);
+    if (ds) {
+        g_DSGetBrightness = (DSGetBrightness_fn)dlsym(ds, "DisplayServicesGetBrightness");
+        g_DSSetBrightness = (DSSetBrightness_fn)dlsym(ds, "DisplayServicesSetBrightness");
+    }
+}
+
+static bool avservice_available() {
+    resolve_private_apis();
+    return g_IOAVServiceWriteI2C != nullptr && g_IOAVServiceReadI2C != nullptr;
 }
 
 // ─── EDID reading via IOKit ─────────────────────────────────────────────────
@@ -167,28 +210,128 @@ static std::string get_display_name(CGDirectDisplayID displayID) {
     return name.empty() ? "Unknown Display" : name;
 }
 
-// ─── Connection type detection ──────────────────────────────────────────────
+// ─── Connection type detection ──────────────────────────────────────────────────────
+
+static bool str_contains_ci(const std::string& str, const std::string& sub) {
+    if (sub.empty()) return true;
+    auto it = std::search(str.begin(), str.end(), sub.begin(), sub.end(),
+        [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+    return it != str.end();
+}
 
 static std::string detect_connection_type(CGDirectDisplayID displayID, bool is_internal) {
     if (is_internal) return "Internal LCD";
 
-    // Try to determine from IOKit
+    uint32_t targetVendor = CGDisplayVendorNumber(displayID);
+    uint32_t targetModel  = CGDisplayModelNumber(displayID);
+
+    // Method 1: Find matching IODisplayConnect and walk IOKit parent tree
+    io_service_t displayService = 0;
+    {
+        CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
+        io_iterator_t iter;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
+            io_service_t serv;
+            while ((serv = IOIteratorNext(iter)) != 0) {
+                CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(
+                    serv, kIODisplayOnlyPreferredName);
+                if (infoDict) {
+                    CFNumberRef vendorRef = (CFNumberRef)CFDictionaryGetValue(
+                        infoDict, CFSTR(kDisplayVendorID));
+                    CFNumberRef productRef = (CFNumberRef)CFDictionaryGetValue(
+                        infoDict, CFSTR(kDisplayProductID));
+                    uint32_t vendor = 0, product = 0;
+                    if (vendorRef) CFNumberGetValue(vendorRef, kCFNumberIntType, &vendor);
+                    if (productRef) CFNumberGetValue(productRef, kCFNumberIntType, &product);
+                    CFRelease(infoDict);
+                    if (vendor == targetVendor && product == targetModel) {
+                        displayService = serv;
+                        break;
+                    }
+                }
+                IOObjectRelease(serv);
+            }
+            IOObjectRelease(iter);
+        }
+    }
+
+    if (displayService) {
+        io_service_t current = displayService;
+        std::string result;
+        for (int depth = 0; depth < 12 && result.empty(); ++depth) {
+            io_name_t className, ioName;
+            IOObjectGetClass(current, className);
+            IORegistryEntryGetName(current, ioName);
+            std::string cls(className), nameStr(ioName);
+
+            if (str_contains_ci(cls, "HDMI") || str_contains_ci(nameStr, "HDMI"))
+                { result = "HDMI"; break; }
+            if ((str_contains_ci(cls, "DisplayPort") || str_contains_ci(nameStr, "DisplayPort"))
+                && cls != "IODisplayConnect")
+                { result = "DisplayPort"; break; }
+            if (str_contains_ci(cls, "Thunderbolt") || str_contains_ci(nameStr, "Thunderbolt"))
+                { result = "Thunderbolt"; break; }
+            if (str_contains_ci(cls, "TypeC") || str_contains_ci(nameStr, "TypeC"))
+                { result = "USB-C"; break; }
+            if (str_contains_ci(cls, "DVI") || str_contains_ci(nameStr, "DVI"))
+                { result = "DVI"; break; }
+
+            // Check "connector-type" property (Apple GPU kext)
+            CFTypeRef connProp = IORegistryEntryCreateCFProperty(
+                current, CFSTR("connector-type"), kCFAllocatorDefault, 0);
+            if (connProp) {
+                if (CFGetTypeID(connProp) == CFDataGetTypeID()) {
+                    CFDataRef data = (CFDataRef)connProp;
+                    if (CFDataGetLength(data) >= 4) {
+                        const UInt8* bytes = CFDataGetBytePtr(data);
+                        uint32_t ct = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+                        switch (ct) {
+                            case 0x02: result = "VGA"; break;
+                            case 0x04: result = "DVI"; break;
+                            case 0x0A: result = "DisplayPort"; break;
+                            case 0x0B: result = "HDMI"; break;
+                        }
+                    }
+                } else if (CFGetTypeID(connProp) == CFStringGetTypeID()) {
+                    std::string ct = cfstring_to_string((CFStringRef)connProp);
+                    if (str_contains_ci(ct, "HDMI")) result = "HDMI";
+                    else if (str_contains_ci(ct, "DisplayPort") || str_contains_ci(ct, "DP"))
+                        result = "DisplayPort";
+                    else if (!ct.empty()) result = ct;
+                }
+                CFRelease(connProp);
+            }
+
+            if (!result.empty()) break;
+
+            io_service_t parent = 0;
+            if (IORegistryEntryGetParentEntry(current, kIOServicePlane, &parent) != KERN_SUCCESS)
+                break;
+            IOObjectRelease(current);
+            current = parent;
+        }
+        IOObjectRelease(current);
+        if (!result.empty()) return result;
+    }
+
+    // Method 2: Try deprecated CGDisplayIOServicePort (Intel fallback)
     io_service_t service = CGDisplayIOServicePort(displayID);
     if (service != MACH_PORT_NULL && service != 0) {
-        // Walk up the IOKit tree to find the framebuffer
         io_service_t parent = 0;
         kern_return_t kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
         if (kr == KERN_SUCCESS && parent) {
-            CFTypeRef connectionType = IORegistryEntryCreateCFProperty(parent, CFSTR("ConnectionType"), kCFAllocatorDefault, 0);
+            CFTypeRef connectionType = IORegistryEntryCreateCFProperty(
+                parent, CFSTR("ConnectionType"), kCFAllocatorDefault, 0);
             if (connectionType) {
                 if (CFGetTypeID(connectionType) == CFStringGetTypeID()) {
                     std::string ct = cfstring_to_string((CFStringRef)connectionType);
                     CFRelease(connectionType);
                     IOObjectRelease(parent);
-                    if (ct.find("HDMI") != std::string::npos) return "HDMI";
-                    if (ct.find("DisplayPort") != std::string::npos || ct.find("DP") != std::string::npos) return "DisplayPort";
-                    if (ct.find("USB") != std::string::npos) return "USB-C";
-                    if (ct.find("Thunderbolt") != std::string::npos) return "Thunderbolt";
+                    if (str_contains_ci(ct, "HDMI")) return "HDMI";
+                    if (str_contains_ci(ct, "DisplayPort") || str_contains_ci(ct, "DP"))
+                        return "DisplayPort";
+                    if (str_contains_ci(ct, "USB")) return "USB-C";
+                    if (str_contains_ci(ct, "Thunderbolt")) return "Thunderbolt";
                     return ct;
                 }
                 CFRelease(connectionType);
@@ -197,77 +340,159 @@ static std::string detect_connection_type(CGDirectDisplayID displayID, bool is_i
         }
     }
 
-    // Default for external: assume DisplayPort/USB-C (most common on modern Macs)
     return "External";
 }
 
-// ─── Internal display brightness via IOKit ──────────────────────────────────
+// ─── Display brightness ───────────────────────────────────────────────────────────────
 
-static bool set_internal_brightness(float level) {
-    // level: 0.0 - 1.0
+static bool set_display_brightness(CGDirectDisplayID displayID, float level) {
+    resolve_private_apis();
+
+    // DisplayServices private API (most reliable on modern macOS / Apple Silicon)
+    if (g_DSSetBrightness) {
+        if (g_DSSetBrightness(displayID, level) == 0) return true;
+    }
+
+    // Fallback: IOKit IODisplaySetFloatParameter
     io_iterator_t iter;
     CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
     if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) != KERN_SUCCESS)
         return false;
 
-    io_service_t service;
+    io_service_t svc;
     bool success = false;
-    while ((service = IOIteratorNext(iter)) != 0) {
-        kern_return_t kr = IODisplaySetFloatParameter(service, kNilOptions, CFSTR(kIODisplayBrightnessKey), level);
-        if (kr == KERN_SUCCESS) {
-            success = true;
-        }
-        IOObjectRelease(service);
+    while ((svc = IOIteratorNext(iter)) != 0) {
+        kern_return_t kr = IODisplaySetFloatParameter(
+            svc, kNilOptions, CFSTR(kIODisplayBrightnessKey), level);
+        if (kr == KERN_SUCCESS) success = true;
+        IOObjectRelease(svc);
         if (success) break;
     }
     IOObjectRelease(iter);
     return success;
 }
 
-static float get_internal_brightness() {
+static float get_display_brightness(CGDirectDisplayID displayID) {
+    resolve_private_apis();
+
+    // DisplayServices private API
+    if (g_DSGetBrightness) {
+        float brightness = 0;
+        if (g_DSGetBrightness(displayID, &brightness) == 0) return brightness;
+    }
+
+    // Fallback: IOKit IODisplayGetFloatParameter
     io_iterator_t iter;
     CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
     if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) != KERN_SUCCESS)
         return -1.0f;
 
-    io_service_t service;
+    io_service_t svc;
     float brightness = -1.0f;
-    while ((service = IOIteratorNext(iter)) != 0) {
+    while ((svc = IOIteratorNext(iter)) != 0) {
         float val = 0;
-        kern_return_t kr = IODisplayGetFloatParameter(service, kNilOptions, CFSTR(kIODisplayBrightnessKey), &val);
-        if (kr == KERN_SUCCESS) {
-            brightness = val;
-        }
-        IOObjectRelease(service);
+        kern_return_t kr = IODisplayGetFloatParameter(
+            svc, kNilOptions, CFSTR(kIODisplayBrightnessKey), &val);
+        if (kr == KERN_SUCCESS) brightness = val;
+        IOObjectRelease(svc);
         if (brightness >= 0) break;
     }
     IOObjectRelease(iter);
     return brightness;
 }
 
-// ─── DDC/CI via IOKit I2C (external monitors) ──────────────────────────────
+// ─── DDC/CI via IOAVService (Apple Silicon) ─────────────────────────────────────────
 
-static io_service_t get_i2c_service_for_display(CGDirectDisplayID displayID) {
-    // Find the IOFramebuffer for this display
-    CFMutableDictionaryRef matching = IOServiceMatching("IOFramebuffer");
+static io_service_t find_avservice_for_display(CGDirectDisplayID displayID) {
+    if (!avservice_available()) return 0;
+
+    uint32_t targetVendor = CGDisplayVendorNumber(displayID);
+    uint32_t targetModel  = CGDisplayModelNumber(displayID);
+
+    CFMutableDictionaryRef matching = IOServiceNameMatching("DCPAVServiceProxy");
     io_iterator_t iter;
     if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) != KERN_SUCCESS)
         return 0;
 
-    io_service_t fb;
-    io_service_t result = 0;
-    while ((fb = IOIteratorNext(iter)) != 0) {
-        // Check display ID match
-        CFTypeRef propDisplayID = IORegistryEntryCreateCFProperty(fb, CFSTR("IOFBDependentIndex"), kCFAllocatorDefault, 0);
-        if (propDisplayID) {
-            CFRelease(propDisplayID);
+    io_service_t serv;
+    while ((serv = IOIteratorNext(iter)) != 0) {
+        bool matched = false;
+        io_iterator_t childIter;
+        if (IORegistryEntryGetChildIterator(serv, kIOServicePlane, &childIter) == KERN_SUCCESS) {
+            io_service_t child;
+            while ((child = IOIteratorNext(childIter)) != 0) {
+                CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(
+                    child, kIODisplayOnlyPreferredName);
+                if (infoDict) {
+                    CFNumberRef vendorRef = (CFNumberRef)CFDictionaryGetValue(
+                        infoDict, CFSTR(kDisplayVendorID));
+                    CFNumberRef productRef = (CFNumberRef)CFDictionaryGetValue(
+                        infoDict, CFSTR(kDisplayProductID));
+                    uint32_t vendor = 0, product = 0;
+                    if (vendorRef) CFNumberGetValue(vendorRef, kCFNumberIntType, &vendor);
+                    if (productRef) CFNumberGetValue(productRef, kCFNumberIntType, &product);
+                    CFRelease(infoDict);
+                    if (vendor == targetVendor && product == targetModel) matched = true;
+                }
+                IOObjectRelease(child);
+                if (matched) break;
+            }
+            IOObjectRelease(childIter);
         }
+        if (matched) { IOObjectRelease(iter); return serv; }
+        IOObjectRelease(serv);
+    }
+    IOObjectRelease(iter);
+    return 0;
+}
 
-        // Check if this framebuffer has I2C
+static bool avservice_ddc_write(io_service_t service, uint8_t command, uint16_t value) {
+    if (!g_IOAVServiceWriteI2C) return false;
+    uint8_t data[6];
+    data[0] = 0x84;
+    data[1] = 0x03;
+    data[2] = command;
+    data[3] = (value >> 8) & 0xFF;
+    data[4] = value & 0xFF;
+    uint8_t checksum = 0x6E ^ 0x51;
+    for (int i = 0; i < 5; i++) checksum ^= data[i];
+    data[5] = checksum;
+    return g_IOAVServiceWriteI2C(service, 0x37, 0x51, data, 6) == KERN_SUCCESS;
+}
+
+static int avservice_ddc_read(io_service_t service, uint8_t command) {
+    if (!g_IOAVServiceWriteI2C || !g_IOAVServiceReadI2C) return -1;
+    uint8_t send[4];
+    send[0] = 0x82;
+    send[1] = 0x01;
+    send[2] = command;
+    uint8_t checksum = 0x6E ^ 0x51;
+    for (int i = 0; i < 3; i++) checksum ^= send[i];
+    send[3] = checksum;
+    if (g_IOAVServiceWriteI2C(service, 0x37, 0x51, send, 4) != KERN_SUCCESS) return -1;
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    uint8_t reply[11] = {};
+    if (g_IOAVServiceReadI2C(service, 0x37, 0x51, reply, 11) != KERN_SUCCESS) return -1;
+    // Parse reply - scan for Get VCP Feature Reply opcode (0x02)
+    for (int i = 2; i < 8; i++) {
+        if (reply[i] == 0x02 && i + 5 < 11)
+            return (reply[i + 4] << 8) | reply[i + 5];
+    }
+    return -1;
+}
+
+// ─── DDC/CI via IOFramebuffer I2C (Intel Macs) ─────────────────────────────────────────
+
+static io_service_t get_i2c_service_for_display(CGDirectDisplayID displayID) {
+    CFMutableDictionaryRef matching = IOServiceMatching("IOFramebuffer");
+    io_iterator_t iter;
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) != KERN_SUCCESS)
+        return 0;
+    io_service_t fb, result = 0;
+    while ((fb = IOIteratorNext(iter)) != 0) {
         IOItemCount busCount = 0;
         if (IOFBGetI2CInterfaceCount(fb, &busCount) == KERN_SUCCESS && busCount > 0) {
-            result = fb;
-            break;
+            result = fb; break;
         }
         IOObjectRelease(fb);
     }
@@ -275,130 +500,109 @@ static io_service_t get_i2c_service_for_display(CGDirectDisplayID displayID) {
     return result;
 }
 
-static bool ddc_write(CGDirectDisplayID displayID, uint8_t command, uint8_t value) {
+static bool ioframebuffer_ddc_write(CGDirectDisplayID displayID, uint8_t command, uint16_t value) {
     io_service_t fb = get_i2c_service_for_display(displayID);
     if (!fb) return false;
-
     io_service_t interface;
     IOI2CConnectRef connect;
-
     if (IOFBCopyI2CInterfaceForBus(fb, 0, &interface) != KERN_SUCCESS) {
-        IOObjectRelease(fb);
-        return false;
+        IOObjectRelease(fb); return false;
     }
-
     if (IOI2CInterfaceOpen(interface, kNilOptions, &connect) != KERN_SUCCESS) {
-        IOObjectRelease(interface);
-        IOObjectRelease(fb);
-        return false;
+        IOObjectRelease(interface); IOObjectRelease(fb); return false;
     }
-
-    // DDC/CI write: addr 0x37, command in data
     uint8_t data[7];
-    data[0] = 0x51;  // DDC/CI source address
-    data[1] = 0x84;  // Length: 4 bytes follow
-    data[2] = 0x03;  // Set VCP Feature opcode
-    data[3] = command;
-    data[4] = (value >> 8) & 0xFF;  // value high byte
-    data[5] = value & 0xFF;         // value low byte
-    // Checksum
-    uint8_t checksum = 0x6E;  // destination address XOR
+    data[0] = 0x51; data[1] = 0x84; data[2] = 0x03; data[3] = command;
+    data[4] = (value >> 8) & 0xFF; data[5] = value & 0xFF;
+    uint8_t checksum = 0x6E;
     for (int i = 0; i < 6; i++) checksum ^= data[i];
     data[6] = checksum;
-
     IOI2CRequest request = {};
-    request.commFlags = 0;
-    request.sendAddress = 0x6E;  // DDC/CI display address (write)
+    request.sendAddress = 0x6E;
     request.sendTransactionType = kIOI2CSimpleTransactionType;
     request.sendBuffer = (vm_address_t)data;
     request.sendBytes = 7;
-
     bool success = IOI2CSendRequest(connect, kNilOptions, &request) == KERN_SUCCESS
                    && request.result == KERN_SUCCESS;
-
     IOI2CInterfaceClose(connect, kNilOptions);
-    IOObjectRelease(interface);
-    IOObjectRelease(fb);
+    IOObjectRelease(interface); IOObjectRelease(fb);
     return success;
 }
 
-static int ddc_read(CGDirectDisplayID displayID, uint8_t command) {
+static int ioframebuffer_ddc_read(CGDirectDisplayID displayID, uint8_t command) {
     io_service_t fb = get_i2c_service_for_display(displayID);
     if (!fb) return -1;
-
     io_service_t interface;
     IOI2CConnectRef connect;
-
     if (IOFBCopyI2CInterfaceForBus(fb, 0, &interface) != KERN_SUCCESS) {
-        IOObjectRelease(fb);
-        return -1;
+        IOObjectRelease(fb); return -1;
     }
-
     if (IOI2CInterfaceOpen(interface, kNilOptions, &connect) != KERN_SUCCESS) {
-        IOObjectRelease(interface);
-        IOObjectRelease(fb);
-        return -1;
+        IOObjectRelease(interface); IOObjectRelease(fb); return -1;
     }
-
-    // Step 1: Send "Get VCP Feature" request
     uint8_t sendData[5];
-    sendData[0] = 0x51;
-    sendData[1] = 0x82;   // Length: 2 bytes follow
-    sendData[2] = 0x01;   // Get VCP Feature opcode
-    sendData[3] = command;
+    sendData[0] = 0x51; sendData[1] = 0x82; sendData[2] = 0x01; sendData[3] = command;
     uint8_t checksum = 0x6E;
     for (int i = 0; i < 4; i++) checksum ^= sendData[i];
     sendData[4] = checksum;
-
     IOI2CRequest request = {};
-    request.commFlags = 0;
     request.sendAddress = 0x6E;
     request.sendTransactionType = kIOI2CSimpleTransactionType;
     request.sendBuffer = (vm_address_t)sendData;
     request.sendBytes = 5;
-
     kern_return_t kr = IOI2CSendRequest(connect, kNilOptions, &request);
     if (kr != KERN_SUCCESS || request.result != KERN_SUCCESS) {
         IOI2CInterfaceClose(connect, kNilOptions);
-        IOObjectRelease(interface);
-        IOObjectRelease(fb);
+        IOObjectRelease(interface); IOObjectRelease(fb);
         return -1;
     }
-
-    // Wait for display to process
     std::this_thread::sleep_for(std::chrono::milliseconds(40));
-
-    // Step 2: Read reply
     uint8_t replyData[12] = {};
     IOI2CRequest readReq = {};
-    readReq.commFlags = 0;
-    readReq.replyAddress = 0x6F;  // DDC/CI display address (read)
+    readReq.replyAddress = 0x6F;
     readReq.replyTransactionType = kIOI2CSimpleTransactionType;
     readReq.replyBuffer = (vm_address_t)replyData;
     readReq.replyBytes = 12;
-
     kr = IOI2CSendRequest(connect, kNilOptions, &readReq);
-
     IOI2CInterfaceClose(connect, kNilOptions);
-    IOObjectRelease(interface);
-    IOObjectRelease(fb);
-
-    if (kr != KERN_SUCCESS || readReq.result != KERN_SUCCESS)
-        return -1;
-
-    // Parse reply: [source, length, result_code, opcode(0x02), type, max_hi, max_lo, cur_hi, cur_lo, checksum]
-    if (readReq.replyBytes >= 10 && replyData[2] == 0x02) {
-        // No error
-    } else if (readReq.replyBytes >= 10 && replyData[3] == 0x02) {
-        // Offset by 1
-        return (replyData[8] << 8) | replyData[9];
+    IOObjectRelease(interface); IOObjectRelease(fb);
+    if (kr != KERN_SUCCESS || readReq.result != KERN_SUCCESS) return -1;
+    // Parse reply - scan for Get VCP Feature Reply opcode (0x02)
+    for (int i = 2; i < 8; i++) {
+        if (replyData[i] == 0x02 && i + 5 < 12)
+            return (replyData[i + 4] << 8) | replyData[i + 5];
     }
-
-    if (readReq.replyBytes >= 9) {
-        return (replyData[7] << 8) | replyData[8];
-    }
-
     return -1;
+}
+
+// ─── Unified DDC/CI (tries IOAVService first, then IOFramebuffer I2C) ────────────────────
+
+static bool ddc_write(CGDirectDisplayID displayID, uint8_t command, uint16_t value) {
+    // Apple Silicon: try IOAVService
+    if (avservice_available()) {
+        io_service_t avs = find_avservice_for_display(displayID);
+        if (avs) {
+            bool ok = avservice_ddc_write(avs, command, value);
+            IOObjectRelease(avs);
+            if (ok) return true;
+        }
+    }
+    // Intel: try IOFramebuffer I2C
+    return ioframebuffer_ddc_write(displayID, command, value);
+}
+
+static int ddc_read(CGDirectDisplayID displayID, uint8_t command) {
+    // Apple Silicon: try IOAVService
+    if (avservice_available()) {
+        io_service_t avs = find_avservice_for_display(displayID);
+        if (avs) {
+            int val = avservice_ddc_read(avs, command);
+            IOObjectRelease(avs);
+            if (val >= 0) return val;
+        }
+    }
+    // Intel: try IOFramebuffer I2C
+    return ioframebuffer_ddc_read(displayID, command);
 }
 
 // ─── macOS Display Detector ─────────────────────────────────────────────────
@@ -547,6 +751,20 @@ public:
                 }
             }
 
+            // ── Enrich connection type from EDID ────────────────────────
+            if (d.connection_type == "External" && !d.edid.connectors.empty()) {
+                for (auto& conn : d.edid.connectors) {
+                    if (conn.type == Connector::Type::HDMI) { d.connection_type = "HDMI"; break; }
+                    else if (conn.type == Connector::Type::DisplayPort) { d.connection_type = "DisplayPort"; break; }
+                    else if (conn.type == Connector::Type::DVI_Single || conn.type == Connector::Type::DVI_Dual)
+                        { d.connection_type = "DVI"; break; }
+                    else if (conn.type == Connector::Type::USB_C || conn.type == Connector::Type::Thunderbolt)
+                        { d.connection_type = "USB-C"; break; }
+                }
+            }
+            if (d.connection_type == "HDMI" && !d.hdmi_version.empty())
+                d.connection_type = d.hdmi_version;
+
             // ── GPU info (placeholder — filled by GPU detector) ─────────
             d.gpu.name = "Apple GPU";
             d.gpu.vendor_name = "Apple";
@@ -562,7 +780,7 @@ public:
 
             // ── Brightness ──────────────────────────────────────────────
             if (is_builtin) {
-                float bri = get_internal_brightness();
+                float bri = get_display_brightness(did);
                 d.cached_brightness = (bri >= 0) ? static_cast<int>(bri * 100.0f) : -1;
             } else {
                 // Try DDC/CI for external monitors
@@ -594,11 +812,11 @@ public:
         CGDirectDisplayID did = display_ids_[idx];
 
         if (display.is_internal) {
-            return set_internal_brightness(static_cast<float>(level) / 100.0f);
+            return set_display_brightness(did, static_cast<float>(level) / 100.0f);
         }
 
         // External: DDC/CI VCP 0x10
-        return ddc_write(did, 0x10, static_cast<uint8_t>(level));
+        return ddc_write(did, 0x10, static_cast<uint16_t>(level));
     }
 
     int get_brightness(DisplayInfo& display) override {
@@ -608,7 +826,7 @@ public:
         CGDirectDisplayID did = display_ids_[idx];
 
         if (display.is_internal) {
-            float bri = get_internal_brightness();
+            float bri = get_display_brightness(did);
             return (bri >= 0) ? static_cast<int>(bri * 100.0f) : -1;
         }
 
@@ -622,7 +840,7 @@ public:
         if (display.is_internal) return false;
 
         CGDirectDisplayID did = display_ids_[idx];
-        return ddc_write(did, 0x60, static_cast<uint8_t>(input_code));
+        return ddc_write(did, 0x60, static_cast<uint16_t>(input_code));
     }
 
     int get_input(DisplayInfo& display) override {
