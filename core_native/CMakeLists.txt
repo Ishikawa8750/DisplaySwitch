@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(DisplaySwitchNative VERSION 2.0.0 LANGUAGES CXX)
+project(DisplaySwitchNative VERSION 2.0.0 LANGUAGES CXX OBJCXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_OBJCXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
@@ -63,10 +64,12 @@ elseif(APPLE)
     find_library(IOKIT_LIBRARY IOKit)
     find_library(COREFOUNDATION_LIBRARY CoreFoundation)
     find_library(COREGRAPHICS_LIBRARY CoreGraphics)
+    find_library(FOUNDATION_LIBRARY Foundation)
     target_link_libraries(displayswitch_core PRIVATE
         ${IOKIT_LIBRARY}
         ${COREFOUNDATION_LIBRARY}
         ${COREGRAPHICS_LIBRARY}
+        ${FOUNDATION_LIBRARY}
     )
 endif()
 
@@ -102,6 +105,7 @@ if(BUILD_SHARED_DLL)
             ${IOKIT_LIBRARY}
             ${COREFOUNDATION_LIBRARY}
             ${COREGRAPHICS_LIBRARY}
+            ${FOUNDATION_LIBRARY}
         )
     endif()
 
