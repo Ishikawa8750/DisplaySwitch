@@ -70,16 +70,16 @@ jobs:
 
   build-macos:
     name: macOS Build (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     strategy:
       matrix:
         include:
           - arch: aarch64
-            runner: macos-latest
             target: aarch64-apple-darwin
+            cmake_arch: arm64
           - arch: x86_64
-            runner: macos-13
             target: x86_64-apple-darwin
+            cmake_arch: x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -102,19 +102,17 @@ jobs:
         run: |
           cmake -S core_native -B core_native/build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} \
             -DBUILD_PYTHON_BINDINGS=OFF \
             -DBUILD_TESTS=OFF
           cmake --build core_native/build --config Release --target displayswitch_ffi
 
-      - name: Verify dylib exists
+      - name: Copy dylib to src-tauri
         run: |
-          if [ ! -f "tauri_ui/src-tauri/libdisplayswitch_ffi.dylib" ]; then
-            # CMake post-build may not copy on macOS, do it manually
-            cp core_native/build/libdisplayswitch_ffi.dylib tauri_ui/src-tauri/ 2>/dev/null || true
-            # Also check in Release subdirectory
-            cp core_native/build/Release/libdisplayswitch_ffi.dylib tauri_ui/src-tauri/ 2>/dev/null || true
-          fi
-          ls -la tauri_ui/src-tauri/libdisplayswitch_ffi.* || echo "WARNING: dylib not found, Tauri build may fail"
+          # CMake post-build copy may fail in cross-compile, ensure it's there
+          cp core_native/build/libdisplayswitch_ffi.dylib tauri_ui/src-tauri/ 2>/dev/null || true
+          ls -la tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
+          file tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
 
       - name: Install frontend dependencies
         working-directory: tauri_ui
