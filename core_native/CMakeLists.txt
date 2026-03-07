@@ -112,6 +112,17 @@ if(BUILD_SHARED_DLL)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tauri_ui/src-tauri/
         COMMENT "Copying $<TARGET_FILE_NAME:displayswitch_ffi> to tauri_ui/src-tauri/"
     )
+
+    # macOS: ad-hoc codesign the dylib so it can be loaded by a signed app
+    if(APPLE)
+        add_custom_command(TARGET displayswitch_ffi POST_BUILD
+            COMMAND codesign --force --sign - --timestamp=none
+                $<TARGET_FILE:displayswitch_ffi>
+            COMMAND codesign --force --sign - --timestamp=none
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tauri_ui/src-tauri/$<TARGET_FILE_NAME:displayswitch_ffi>
+            COMMENT "Ad-hoc codesigning dylib for macOS"
+        )
+    endif()
 endif()
 
 # Python bindings

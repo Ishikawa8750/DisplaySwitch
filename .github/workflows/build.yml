@@ -107,7 +107,7 @@ jobs:
             -DBUILD_TESTS=OFF
           cmake --build core_native/build --config Release --target displayswitch_ffi
 
-      - name: Copy dylib to src-tauri
+      - name: Copy and codesign dylib
         run: |
           # Find the dylib — CMake output path varies by generator
           DYLIB=$(find core_native/build -name "libdisplayswitch_ffi.dylib" -type f | head -1)
@@ -118,6 +118,10 @@ jobs:
           fi
           echo "Found dylib: $DYLIB"
           cp "$DYLIB" tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
+          # Ad-hoc codesign dylib to match app's ad-hoc signature
+          codesign --force --sign - --timestamp=none tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
+          echo "=== Codesign info ==="
+          codesign -dvv tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
           ls -la tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
           file tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
           otool -L tauri_ui/src-tauri/libdisplayswitch_ffi.dylib || true
@@ -146,17 +150,35 @@ jobs:
             echo "Searching for dylib anywhere in bundle:"
             find "$APP_PATH" -name "*displayswitch_ffi*" -type f || echo "dylib not found in bundle!"
 
-            echo "=== Signing: $APP_PATH ==="
-            codesign --force --deep -s - "$APP_PATH"
-            codesign -vv "$APP_PATH" || true
+            echo "=== Signing dylib in bundle ==="
+            BUNDLE_DYLIB=$(find "$APP_PATH" -name "*displayswitch_ffi*" -type f | head -1)
+            if [ -n "$BUNDLE_DYLIB" ]; then
+              codesign --force --sign - --timestamp=none "$BUNDLE_DYLIB"
+            fi
+
+            echo "=== Signing app with entitlements ==="
+            codesign --force --sign - --entitlements tauri_ui/src-tauri/Entitlements.plist --deep --timestamp=none "$APP_PATH"
+            codesign --verify --deep --strict "$APP_PATH" || true
+            codesign -dvv "$APP_PATH/Contents/MacOS/"* || true
           fi
 
       - name: Re-create DMG with signed app
         run: |
+          APP_PATH=$(find tauri_ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app" -maxdepth 1 | head -1)
           DMG_PATH=$(find tauri_ui/src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" -maxdepth 1 | head -1)
-          if [ -n "$DMG_PATH" ]; then
-            echo "Stripping quarantine attributes from DMG: $DMG_PATH"
-            xattr -cr "$DMG_PATH" 2>/dev/null || true
+          if [ -n "$DMG_PATH" ] && [ -n "$APP_PATH" ]; then
+            APP_NAME=$(basename "$APP_PATH")
+            DMG_NAME=$(basename "$DMG_PATH")
+            DMG_DIR=$(dirname "$DMG_PATH")
+            
+            echo "Re-creating DMG with signed app..."
+            # Create new DMG from signed app
+            hdiutil create -volname "DisplaySwitch" -srcfolder "$APP_PATH" \
+              -ov -format UDZO "$DMG_DIR/$DMG_NAME"
+            
+            xattr -cr "$DMG_DIR/$DMG_NAME" 2>/dev/null || true
+            echo "DMG re-created: $DMG_DIR/$DMG_NAME"
+            ls -la "$DMG_DIR/$DMG_NAME"
           fi
 
       - name: Upload macOS artifacts
