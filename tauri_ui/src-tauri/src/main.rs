@@ -230,10 +230,22 @@ struct NativeCore {
 unsafe impl Send for NativeCore {}
 unsafe impl Sync for NativeCore {}
 
+/// Wrapper that holds either a working NativeCore or the init error message.
+struct NativeCoreState {
+    core: Option<NativeCore>,
+    init_error: String,
+}
+
 impl NativeCore {
     fn new() -> Result<Self, String> {
         let dll_path = Self::find_dll()?;
         eprintln!("[NativeCore] Loading DLL: {}", dll_path.display());
+
+        // Verify file is readable before attempting dlopen
+        match std::fs::metadata(&dll_path) {
+            Ok(m) => eprintln!("[NativeCore] File size: {} bytes", m.len()),
+            Err(e) => eprintln!("[NativeCore] WARNING: cannot stat file: {}", e),
+        }
 
         let lib = unsafe {
             Library::new(&dll_path)
@@ -308,41 +320,65 @@ impl NativeCore {
         #[cfg(target_os = "linux")]
         let lib_name = "libdisplayswitch_ffi.so";
 
-        let candidates = [
+        let exe_path = std::env::current_exe().ok();
+        eprintln!("[NativeCore] Executable: {:?}", exe_path);
+
+        let mut candidates: Vec<Option<PathBuf>> = vec![
             // 1. Same directory as executable (bundled app)
-            std::env::current_exe()
-                .ok()
+            exe_path.as_ref()
                 .and_then(|e| e.parent().map(|p| p.join(lib_name))),
-            // 2. macOS .app bundle Resources/
-            #[cfg(target_os = "macos")]
-            std::env::current_exe()
-                .ok()
-                .and_then(|e| e.parent().and_then(|p| p.parent()).map(|p| p.join("Resources").join(lib_name))),
-            #[cfg(not(target_os = "macos"))]
-            None,
-            // 3. src-tauri/ (dev mode, CMake post-build copy)
-            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(lib_name)),
-            // 4. core_native/build/Release/
-            Some(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
-                    .join("core_native")
-                    .join("build")
-                    .join("Release")
-                    .join(lib_name),
-            ),
         ];
 
+        // macOS-specific paths
+        #[cfg(target_os = "macos")]
+        {
+            // 2. .app/Contents/Resources/ (Tauri bundled resources)
+            candidates.push(
+                exe_path.as_ref()
+                    .and_then(|e| e.parent().and_then(|p| p.parent())
+                        .map(|p| p.join("Resources").join(lib_name))),
+            );
+            // 3. .app/Contents/Frameworks/ (standard macOS dylib location)
+            candidates.push(
+                exe_path.as_ref()
+                    .and_then(|e| e.parent().and_then(|p| p.parent())
+                        .map(|p| p.join("Frameworks").join(lib_name))),
+            );
+            // 4. .app/Contents/MacOS/ (same as #1, explicit)
+            candidates.push(
+                exe_path.as_ref()
+                    .and_then(|e| e.parent().map(|p| p.join(lib_name))),
+            );
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        candidates.push(None); // placeholder
+
+        // 5. src-tauri/ (dev mode, CMake post-build copy)
+        candidates.push(Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(lib_name)));
+
+        // 6. core_native/build/ (direct cmake output, no Release subdir on macOS)
+        if let Some(manifest_parent) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()) {
+            candidates.push(Some(manifest_parent.join("core_native").join("build").join(lib_name)));
+            candidates.push(Some(manifest_parent.join("core_native").join("build").join("Release").join(lib_name)));
+        }
+
+        // Log all candidates for diagnostics
+        let mut tried = Vec::new();
         for candidate in candidates.iter().flatten() {
-            if candidate.exists() {
+            let exists = candidate.exists();
+            eprintln!("[NativeCore] Search: {} (exists={})", candidate.display(), exists);
+            tried.push(format!("{} ({})", candidate.display(), if exists { "found" } else { "missing" }));
+            if exists {
                 return Ok(candidate.clone());
             }
         }
 
-        Err(format!("{} not found. Build core_native first.", lib_name))
+        Err(format!(
+            "{} not found. Searched:\n  {}",
+            lib_name,
+            tried.join("\n  ")
+        ))
     }
 
     fn scan(&self) -> Result<Vec<DisplayInfo>, String> {
@@ -424,9 +460,11 @@ impl Drop for NativeCore {
 // ─── Tauri Commands ─────────────────────────────────────────────────────
 
 #[tauri::command]
-fn scan_monitors(state: tauri::State<'_, Mutex<Option<NativeCore>>>) -> Result<Vec<DisplayInfo>, String> {
+fn scan_monitors(state: tauri::State<'_, Mutex<NativeCoreState>>) -> Result<Vec<DisplayInfo>, String> {
     let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
-    let core = guard.as_ref().ok_or("Native core not available – display library failed to load")?;
+    let core = guard.core.as_ref().ok_or_else(|| {
+        format!("Native core not available: {}", guard.init_error)
+    })?;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| core.scan())) {
         Ok(result) => result,
         Err(_) => Err("Internal error: scan panicked".to_string()),
@@ -435,12 +473,12 @@ fn scan_monitors(state: tauri::State<'_, Mutex<Option<NativeCore>>>) -> Result<V
 
 #[tauri::command]
 fn set_brightness(
-    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
     display_index: i32,
     level: i32,
 ) -> Result<(), String> {
     let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
-    let core = guard.as_ref().ok_or("Native core not available")?;
+    let core = guard.core.as_ref().ok_or("Native core not available")?;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         core.set_brightness(display_index, level)
     })) {
@@ -451,14 +489,14 @@ fn set_brightness(
 
 #[tauri::command]
 fn set_input(
-    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
     display_index: i32,
     input_code: i32,
 ) -> Result<i32, String> {
     // Step 1: send the set_input command (hold lock briefly)
     {
         let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
-        let core = guard.as_ref().ok_or("Native core not available")?;
+        let core = guard.core.as_ref().ok_or("Native core not available")?;
         core.set_input(display_index, input_code)?;
     } // <-- mutex released here
 
@@ -467,7 +505,7 @@ fn set_input(
 
     // Step 3: re-acquire lock to read back the confirmed input
     let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
-    let core = guard.as_ref().ok_or("Native core not available")?;
+    let core = guard.core.as_ref().ok_or("Native core not available")?;
     let confirmed = core.get_input(display_index);
     Ok(confirmed)
 }
@@ -475,14 +513,14 @@ fn set_input(
 /// Get brightness for a single display without full rescan (fast path).
 #[tauri::command]
 fn get_brightness(
-    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
     display_index: i32,
 ) -> Result<i32, String> {
     let guard = match state.lock() {
         Ok(c) => c,
         Err(_) => return Ok(-1),
     };
-    let core = match guard.as_ref() {
+    let core = match guard.core.as_ref() {
         Some(c) => c,
         None => return Ok(-1),
     };
@@ -497,14 +535,14 @@ fn get_brightness(
 /// Get current input source for a single display without full rescan.
 #[tauri::command]
 fn get_input(
-    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
     display_index: i32,
 ) -> Result<i32, String> {
     let guard = match state.lock() {
         Ok(c) => c,
         Err(_) => return Ok(-1),
     };
-    let core = match guard.as_ref() {
+    let core = match guard.core.as_ref() {
         Some(c) => c,
         None => return Ok(-1),
     };
@@ -943,14 +981,14 @@ mod hotplug {
 // ─── main ───────────────────────────────────────────────────────────────
 
 fn main() {
-    let core = match NativeCore::new() {
+    let state = match NativeCore::new() {
         Ok(c) => {
             eprintln!("[NativeCore] Loaded successfully");
-            Some(c)
+            NativeCoreState { core: Some(c), init_error: String::new() }
         }
         Err(e) => {
             eprintln!("[NativeCore] Failed to load: {}. Running in UI-only mode.", e);
-            None
+            NativeCoreState { core: None, init_error: e }
         }
     };
 
@@ -973,7 +1011,7 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
-        .manage(Mutex::new(core))
+        .manage(Mutex::new(state))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             scan_monitors,

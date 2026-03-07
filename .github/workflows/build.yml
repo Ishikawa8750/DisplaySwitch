@@ -109,10 +109,18 @@ jobs:
 
       - name: Copy dylib to src-tauri
         run: |
-          # CMake post-build copy may fail in cross-compile, ensure it's there
-          cp core_native/build/libdisplayswitch_ffi.dylib tauri_ui/src-tauri/ 2>/dev/null || true
+          # Find the dylib — CMake output path varies by generator
+          DYLIB=$(find core_native/build -name "libdisplayswitch_ffi.dylib" -type f | head -1)
+          if [ -z "$DYLIB" ]; then
+            echo "ERROR: libdisplayswitch_ffi.dylib not found in build tree!"
+            find core_native/build -type f -name "*.dylib" || true
+            exit 1
+          fi
+          echo "Found dylib: $DYLIB"
+          cp "$DYLIB" tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
           ls -la tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
           file tauri_ui/src-tauri/libdisplayswitch_ffi.dylib
+          otool -L tauri_ui/src-tauri/libdisplayswitch_ffi.dylib || true
 
       - name: Install frontend dependencies
         working-directory: tauri_ui
@@ -130,7 +138,15 @@ jobs:
         run: |
           APP_PATH=$(find tauri_ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app" -maxdepth 1 | head -1)
           if [ -n "$APP_PATH" ]; then
-            echo "Signing: $APP_PATH"
+            echo "=== Verifying dylib in bundle ==="
+            echo "Listing Contents/Resources/:"
+            ls -la "$APP_PATH/Contents/Resources/" || echo "Resources/ not found"
+            echo "Listing Contents/MacOS/:"
+            ls -la "$APP_PATH/Contents/MacOS/" || echo "MacOS/ not found"
+            echo "Searching for dylib anywhere in bundle:"
+            find "$APP_PATH" -name "*displayswitch_ffi*" -type f || echo "dylib not found in bundle!"
+
+            echo "=== Signing: $APP_PATH ==="
             codesign --force --deep -s - "$APP_PATH"
             codesign -vv "$APP_PATH" || true
           fi
