@@ -172,6 +172,12 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    animation: topo-fade-in 0.4s ease-out;
+  }
+
+  @keyframes topo-fade-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   .topology-svg {
@@ -193,6 +199,10 @@
     fill: #24283b;
     stroke: #7aa2f7;
     stroke-width: 1;
+    transition: filter 0.2s;
+  }
+  .node-gpu:hover {
+    filter: drop-shadow(0 0 6px rgba(122,162,247,0.4));
   }
   :global(html.light) .node-gpu {
     fill: #d5d6db;
@@ -202,6 +212,10 @@
   /* Display node */
   .node-display {
     fill: #1a1b26;
+    transition: filter 0.2s, transform 0.2s;
+  }
+  .node-display:hover {
+    filter: drop-shadow(0 0 6px rgba(122,162,247,0.3));
   }
   :global(html.light) .node-display {
     fill: #d5d6db;
@@ -219,6 +233,10 @@
   /* Connection hover */
   .conn-line {
     transition: stroke-width 0.15s;
+    animation: dash-flow 1.5s linear infinite;
+  }
+  @keyframes dash-flow {
+    to { stroke-dashoffset: -18; }
   }
   .conn-line:hover {
     stroke-width: 2.5;

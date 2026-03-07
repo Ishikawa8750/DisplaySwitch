@@ -85,7 +85,7 @@
 
   <!-- Version -->
   <div class="status-item version">
-    <span class="status-text">v2.0.0</span>
+    <span class="status-text">v2.11.0</span>
   </div>
 </footer>
 
@@ -107,6 +107,12 @@
     z-index: 500;
     user-select: none;
     font-family: "Segoe UI", -apple-system, sans-serif;
+    animation: statusbar-slide-up 0.35s ease-out;
+  }
+
+  @keyframes statusbar-slide-up {
+    from { transform: translateY(100%); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
   }
 
   :global(html.light) .status-bar {
@@ -120,6 +126,19 @@
     align-items: center;
     gap: 4px;
     white-space: nowrap;
+    padding: 0 4px;
+    border-radius: 3px;
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+
+  .status-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #a9b1d6;
+  }
+
+  :global(html.light) .status-item:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #4c5272;
   }
 
   .status-text {

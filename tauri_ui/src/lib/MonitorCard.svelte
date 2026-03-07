@@ -20,6 +20,9 @@
   let editingInputCode = $state<number | null>(null);
   let editingInputValue = $state("");
 
+  // Context menu for input rename
+  let contextMenu = $state<{ x: number; y: number; code: number } | null>(null);
+
   // Auto-clear brightnessOverride after user stops dragging (sync with backend)
   let overrideClearTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -38,7 +41,6 @@
     if (brightnessTimer) clearTimeout(brightnessTimer);
     brightnessTimer = setTimeout(() => commitBrightness(val), 150);
 
-    // Reset override after 3s of inactivity so periodic sync can update
     if (overrideClearTimer) clearTimeout(overrideClearTimer);
     overrideClearTimer = setTimeout(() => {
       brightnessOverride = null;
@@ -67,7 +69,6 @@
         inputCode: code,
       });
       statusMsg = "";
-      // Update local state with confirmed input source
       if (confirmedInput >= 0) {
         onchange?.({ current_input: confirmedInput });
       }
@@ -105,15 +106,29 @@
     return DEFAULT_INPUT_NAMES[code] ?? `Input 0x${code.toString(16).toUpperCase()}`;
   }
 
+  function hasCustomName(code: number): boolean {
+    return !!customInputNames?.[String(code)];
+  }
+
+  function openContextMenu(e: MouseEvent, code: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    contextMenu = { x: e.clientX, y: e.clientY, code };
+  }
+
+  function closeContextMenu() {
+    contextMenu = null;
+  }
+
   function startEditing(code: number) {
     editingInputCode = code;
     editingInputValue = getInputName(code);
+    contextMenu = null;
   }
 
   function commitEdit(code: number) {
     const trimmed = editingInputValue.trim();
     const defaultName = DEFAULT_INPUT_NAMES[code] ?? `Input 0x${code.toString(16).toUpperCase()}`;
-    // If the name matches default or is empty, reset to default (remove custom)
     if (!trimmed || trimmed === defaultName) {
       onInputNameChange?.(code, null);
     } else {
@@ -125,6 +140,7 @@
   function resetInputName(code: number) {
     onInputNameChange?.(code, null);
     editingInputCode = null;
+    contextMenu = null;
   }
 
   function resetAllInputNames() {
@@ -133,8 +149,16 @@
       onInputNameChange?.(code, null);
     }
     editingInputCode = null;
+    contextMenu = null;
+  }
+
+  // Close context menu on outside click
+  function handleWindowClick() {
+    if (contextMenu) contextMenu = null;
   }
 </script>
+
+<svelte:window onclick={handleWindowClick} />
 
 <article class="card">
   <!-- Header -->
@@ -237,14 +261,14 @@
                 autofocus
               />
               <button class="edit-action-btn" onclick={() => commitEdit(code)} title={t("input.save")}>✓</button>
-              <button class="edit-action-btn" onclick={() => resetInputName(code)} title={t("input.reset")}>↺</button>
             </span>
           {:else}
             <button
               class:active={code === display.current_input}
+              class:custom-named={hasCustomName(code)}
               onclick={() => switchInput(code)}
-              ondblclick={(e) => { e.preventDefault(); startEditing(code); }}
-              title={t("input.dblclick_edit")}
+              oncontextmenu={(e) => openContextMenu(e, code)}
+              title={t("input.right_click_edit")}
             >
               {getInputName(code)}
               {#if code === display.current_input} ✓{/if}
@@ -252,8 +276,26 @@
           {/if}
         {/each}
       </div>
+    </div>
+  {/if}
+
+  <!-- Context Menu -->
+  {#if contextMenu}
+    <div class="ctx-menu" style="left:{contextMenu.x}px;top:{contextMenu.y}px"
+      onclick={(e) => e.stopPropagation()}>
+      <button class="ctx-item" onclick={() => startEditing(contextMenu.code)}>
+        ✏️ {t("input.rename")}
+      </button>
+      {#if hasCustomName(contextMenu.code)}
+        <button class="ctx-item" onclick={() => resetInputName(contextMenu.code)}>
+          ↺ {t("input.reset")}
+        </button>
+      {/if}
       {#if customInputNames && Object.keys(customInputNames).length > 0}
-        <button class="reset-all-btn" onclick={resetAllInputNames} title={t("input.reset_all")}>↺</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item danger" onclick={resetAllInputNames}>
+          ↺ {t("input.reset_all")}
+        </button>
       {/if}
     </div>
   {/if}
@@ -269,9 +311,19 @@
     background: #1a1b26;
     border-bottom: 1px solid #232433;
     padding: 14px 16px;
-    transition: background 0.15s;
+    transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+    animation: card-enter 0.3s ease-out both;
   }
-  .card:hover { background: #1e1f2e; }
+  .card:hover {
+    background: #1e1f2e;
+    transform: translateX(2px);
+    box-shadow: -2px 0 0 0 #7aa2f7;
+  }
+
+  @keyframes card-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
   .header {
     display: flex;
@@ -284,7 +336,10 @@
     width: 28px;
     text-align: center;
     flex-shrink: 0;
+    transition: transform 0.2s;
   }
+  .card:hover .icon { transform: scale(1.15); }
+
   .info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   h2 {
     margin: 0;
@@ -305,7 +360,23 @@
     margin-bottom: 10px;
     padding-left: 38px;
   }
-  .row { display: flex; gap: 8px; align-items: baseline; }
+  .row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    animation: row-enter 0.25s ease-out both;
+  }
+  .row:nth-child(1) { animation-delay: 0.05s; }
+  .row:nth-child(2) { animation-delay: 0.1s; }
+  .row:nth-child(3) { animation-delay: 0.15s; }
+  .row:nth-child(4) { animation-delay: 0.2s; }
+  .row:nth-child(5) { animation-delay: 0.25s; }
+
+  @keyframes row-enter {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
   .label {
     font-size: 11px;
     color: #565a89;
@@ -328,8 +399,14 @@
     flex: 1;
     accent-color: #7aa2f7;
     height: 4px;
+    transition: accent-color 0.2s;
   }
-  .val { font-size: 12px; min-width: 36px; color: #a9b1d6; }
+  .val {
+    font-size: 12px;
+    min-width: 36px;
+    color: #a9b1d6;
+    transition: color 0.2s;
+  }
 
   .inputs {
     display: flex;
@@ -347,17 +424,37 @@
     color: #a9b1d6;
     cursor: pointer;
     font-size: 11px;
-    transition: all 0.15s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     font-family: inherit;
+    position: relative;
+    overflow: hidden;
   }
+  .btn-group button::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(122,162,247,0.25) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  .btn-group button:active::after { opacity: 1; }
   .btn-group button:hover {
     background: #2a2e47;
     border-color: #7aa2f7;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(122,162,247,0.15);
+  }
+  .btn-group button:active {
+    transform: translateY(0);
   }
   .btn-group button.active {
     background: #34548a;
     border-color: #7aa2f7;
     color: #c0caf5;
+    box-shadow: 0 0 8px rgba(122,162,247,0.2);
+  }
+  .btn-group button.custom-named {
+    border-style: dashed;
   }
 
   .status-msg {
@@ -368,12 +465,23 @@
     padding-left: 38px;
     background: rgba(247, 118, 142, 0.08);
     border-left: 2px solid #f7768e;
+    animation: msg-enter 0.2s ease-out;
+  }
+
+  @keyframes msg-enter {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   .input-edit-wrap {
     display: inline-flex;
     align-items: center;
     gap: 2px;
+    animation: edit-pop 0.2s ease-out;
+  }
+  @keyframes edit-pop {
+    from { opacity: 0; transform: scale(0.9); }
+    to   { opacity: 1; transform: scale(1); }
   }
   .input-name-edit {
     width: 72px;
@@ -385,7 +493,9 @@
     background: #1a1b26;
     color: #c0caf5;
     outline: none;
+    transition: box-shadow 0.2s;
   }
+  .input-name-edit:focus { box-shadow: 0 0 0 2px rgba(122,162,247,0.25); }
   .edit-action-btn {
     padding: 2px 5px;
     font-size: 11px;
@@ -396,28 +506,56 @@
     cursor: pointer;
     font-family: inherit;
     line-height: 1;
+    transition: background 0.15s;
   }
   .edit-action-btn:hover { background: #24283b; }
-  .reset-all-btn {
-    padding: 2px 5px;
-    font-size: 12px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 3px;
-    color: #565a89;
-    cursor: pointer;
-    font-family: inherit;
-    line-height: 1;
-    flex-shrink: 0;
+
+  /* ── Context menu ── */
+  .ctx-menu {
+    position: fixed;
+    z-index: 9999;
+    background: #24283b;
+    border: 1px solid #3b3f5c;
+    border-radius: 6px;
+    padding: 4px 0;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    animation: ctx-enter 0.15s ease-out;
   }
-  .reset-all-btn:hover { color: #f7768e; border-color: #f7768e; }
+  @keyframes ctx-enter {
+    from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .ctx-item {
+    display: block;
+    width: 100%;
+    padding: 6px 14px;
+    border: none;
+    background: transparent;
+    color: #a9b1d6;
+    font-size: 12px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .ctx-item:hover { background: rgba(122,162,247,0.12); color: #c0caf5; }
+  .ctx-item.danger:hover { background: rgba(247,118,142,0.12); color: #f7768e; }
+  .ctx-sep {
+    height: 1px;
+    margin: 4px 8px;
+    background: #3b3f5c;
+  }
 
   /* ── Light theme ── */
   :global(html.light) .card {
     background: #d5d6db;
     border-bottom-color: #c4c5ca;
   }
-  :global(html.light) .card:hover { background: #cdced3; }
+  :global(html.light) .card:hover {
+    background: #cdced3;
+    box-shadow: -2px 0 0 0 #34548a;
+  }
   :global(html.light) h2 { color: #343b58; }
   :global(html.light) .gpu { color: #8990b3; }
   :global(html.light) .model { color: #9ca0b9; }
@@ -435,11 +573,13 @@
   :global(html.light) .btn-group button:hover {
     background: #b8b9be;
     border-color: #34548a;
+    box-shadow: 0 2px 6px rgba(52,84,138,0.12);
   }
   :global(html.light) .btn-group button.active {
     background: #34548a;
     border-color: #2e4a7a;
     color: #d5d6db;
+    box-shadow: 0 0 8px rgba(52,84,138,0.15);
   }
   :global(html.light) .status-msg {
     color: #8c4351;
@@ -453,6 +593,13 @@
   }
   :global(html.light) .edit-action-btn { color: #34548a; }
   :global(html.light) .edit-action-btn:hover { background: #c4c5ca; }
-  :global(html.light) .reset-all-btn { color: #8990b3; }
-  :global(html.light) .reset-all-btn:hover { color: #8c4351; border-color: #8c4351; }
+  :global(html.light) .ctx-menu {
+    background: #d5d6db;
+    border-color: #b8b9be;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  }
+  :global(html.light) .ctx-item { color: #343b58; }
+  :global(html.light) .ctx-item:hover { background: rgba(52,84,138,0.1); color: #343b58; }
+  :global(html.light) .ctx-item.danger:hover { background: rgba(140,67,81,0.1); color: #8c4351; }
+  :global(html.light) .ctx-sep { background: #b8b9be; }
 </style>

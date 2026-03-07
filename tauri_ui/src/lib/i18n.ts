@@ -28,9 +28,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "card.brightness.na": "Not available (DDC/CI not supported)",
     "card.input": "Input",
     "input.save": "Save",
+    "input.rename": "Rename",
     "input.reset": "Reset to default",
     "input.reset_all": "Reset all input names",
-    "input.dblclick_edit": "Double-click to rename",
+    "input.right_click_edit": "Right-click to rename",
 
     // Settings Panel
     "settings.title": "Settings",
@@ -136,9 +137,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "card.brightness.na": "不可用 (DDC/CI 不支持)",
     "card.input": "输入源",
     "input.save": "保存",
+    "input.rename": "重命名",
     "input.reset": "重置为默认",
     "input.reset_all": "重置所有输入名称",
-    "input.dblclick_edit": "双击重命名",
+    "input.right_click_edit": "右键重命名",
 
     // Settings Panel
     "settings.title": "设置",
