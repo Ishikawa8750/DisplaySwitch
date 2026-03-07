@@ -35,8 +35,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "displayswitch_ffi.*",
-      "libdisplayswitch_ffi.*"
+      "*displayswitch_ffi*"
     ],
     "windows": {
       "nsis": {
