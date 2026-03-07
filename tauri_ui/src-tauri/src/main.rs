@@ -22,6 +22,9 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
+
+#[cfg(target_os = "macos")]
+use tauri::menu::Submenu;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -652,6 +655,38 @@ async fn check_for_update(app: tauri::AppHandle) -> Result<Option<String>, Strin
     }
 }
 
+/// Return the current platform for frontend conditional rendering.
+#[tauri::command]
+fn get_platform() -> String {
+    if cfg!(target_os = "windows") {
+        "windows".to_string()
+    } else if cfg!(target_os = "macos") {
+        "macos".to_string()
+    } else {
+        "linux".to_string()
+    }
+}
+
+/// Window control commands for custom title bar (Windows).
+#[tauri::command]
+fn window_minimize(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::Window) -> Result<(), String> {
+    if window.is_maximized().unwrap_or(false) {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn window_close(window: tauri::Window) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
+}
+
 // ─── Hot-plug detection (Windows WM_DISPLAYCHANGE) ──────────────────────
 
 #[cfg(target_os = "windows")]
@@ -929,8 +964,74 @@ fn main() {
             unregister_all_hotkeys,
             get_ambient_light,
             check_for_update,
+            get_platform,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
         ])
         .setup(|app| {
+            // ── macOS: native decorations + overlay title bar + app menu ─
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::WebviewWindowBuilder;
+
+                // Re-enable decorations on macOS (disabled in tauri.conf.json for Windows)
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(true);
+                }
+
+                // macOS native menu bar
+                let app_menu = Submenu::with_items(
+                    app,
+                    "DisplaySwitch",
+                    true,
+                    &[
+                        &MenuItem::with_id(app, "about", "About DisplaySwitch", true, None::<&str>)?,
+                        &MenuItem::with_id(app, "check_update", "Check for Updates…", true, None::<&str>)?,
+                        &MenuItem::with_id(app, "quit_menu", "Quit DisplaySwitch", true, Some("CmdOrCtrl+Q"))?,
+                    ],
+                )?;
+
+                let view_menu = Submenu::with_items(
+                    app,
+                    "View",
+                    true,
+                    &[
+                        &MenuItem::with_id(app, "refresh_menu", "Refresh Displays", true, Some("CmdOrCtrl+R"))?,
+                        &MenuItem::with_id(app, "settings_menu", "Settings…", true, Some("CmdOrCtrl+,"))?,
+                    ],
+                )?;
+
+                let window_menu = Submenu::with_items(
+                    app,
+                    "Window",
+                    true,
+                    &[
+                        &MenuItem::with_id(app, "minimize_menu", "Minimize", true, Some("CmdOrCtrl+M"))?,
+                        &MenuItem::with_id(app, "close_menu", "Close", true, Some("CmdOrCtrl+W"))?,
+                    ],
+                )?;
+
+                let menu_bar = Menu::with_items(app, &[&app_menu, &view_menu, &window_menu])?;
+                app.set_menu(menu_bar)?;
+
+                app.on_menu_event(move |app, event| {
+                    match event.id().as_ref() {
+                        "quit_menu" => app.exit(0),
+                        "refresh_menu" => { let _ = app.emit("menu-action", "refresh"); },
+                        "settings_menu" => { let _ = app.emit("menu-action", "settings"); },
+                        "check_update" => { let _ = app.emit("menu-action", "check_update"); },
+                        "minimize_menu" => {
+                            if let Some(w) = app.get_webview_window("main") { let _ = w.minimize(); }
+                        },
+                        "close_menu" => {
+                            if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+                        },
+                        _ => {}
+                    }
+                });
+            }
+
             // ── System tray ─────────────────────────────────────────
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DisplaySwitch — Topology Sample</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #1a1b26; --bg-deep: #16161e; --bg-card: #24283b;
+    --fg: #a9b1d6; --fg-title: #c0caf5; --fg-sub: #565a89;
+    --accent: #7aa2f7; --border: #232433; --badge-bg: #1a1b26;
+    --bar-bg: #16161e; --bar-border: #101014;
+    --activity-bg: #16161e; --activity-border: #101014;
+    --panel-bg: #1a1b26; --panel-border: #101014;
+  }
+  html.light {
+    --bg: #d5d6db; --bg-deep: #e9e9ec; --bg-card: #d5d6db;
+    --fg: #343b58; --fg-title: #343b58; --fg-sub: #8990b3;
+    --accent: #34548a; --border: #c4c5ca; --badge-bg: #e9e9ec;
+    --bar-bg: #c4c5ca; --bar-border: #b8b9be;
+    --activity-bg: #c4c5ca; --activity-border: #b8b9be;
+    --panel-bg: #d5d6db; --panel-border: #c4c5ca;
+  }
+
+  body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px; line-height: 1.4;
+    background: var(--bg); color: var(--fg);
+    overflow: hidden; height: 100vh;
+  }
+
+  /* ─── Title Bar ─── */
+  .titlebar {
+    height: 30px; display: flex; align-items: center;
+    background: var(--bar-bg); border-bottom: 1px solid var(--bar-border);
+    user-select: none; padding: 0 8px;
+  }
+  .titlebar-title {
+    flex: 1; text-align: center; font-size: 12px;
+    color: var(--fg-sub); font-weight: 500;
+  }
+  .titlebar-btns { display: flex; gap: 0; }
+  .titlebar-btn {
+    width: 46px; height: 30px; border: none; background: transparent;
+    color: var(--fg-sub); cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .titlebar-btn:hover { background: rgba(255,255,255,0.06); }
+  .titlebar-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ─── App Shell ─── */
+  .app-shell {
+    display: flex; height: calc(100vh - 31px); width: 100vw;
+  }
+
+  /* ─── Activity Bar ─── */
+  .activity-bar {
+    width: 48px; min-width: 48px;
+    background: var(--activity-bg);
+    border-right: 1px solid var(--activity-border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 4px 0;
+  }
+  .activity-top { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .activity-bottom { display: flex; flex-direction: column; gap: 2px; padding-bottom: 24px; }
+  .activity-btn {
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 0; background: transparent;
+    color: var(--fg-sub); cursor: pointer; position: relative;
+  }
+  .activity-btn:hover { color: var(--fg); }
+  .activity-btn.active { color: var(--fg-title); }
+  .activity-btn.active::before {
+    content: ""; position: absolute; left: 0; top: 8px; bottom: 8px;
+    width: 2px; background: var(--accent); border-radius: 0 1px 1px 0;
+  }
+
+  /* ─── Main Area ─── */
+  .main-area { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .panel-header {
+    height: 35px; min-height: 35px;
+    display: flex; align-items: center; padding: 0 16px;
+    background: var(--panel-bg); border-bottom: 1px solid var(--panel-border);
+    user-select: none;
+  }
+  .panel-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.8px; color: var(--fg-sub);
+  }
+  .content-scroll {
+    flex: 1; overflow-y: auto; padding: 12px 16px; padding-bottom: 40px;
+  }
+
+  /* ─── Topology SVG ─── */
+  .topology-container { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+  .topology-svg {
+    display: block; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg-deep);
+  }
+  .node-gpu { fill: var(--bg-card); stroke: var(--accent); stroke-width: 1; }
+  .node-display { fill: var(--bg); }
+  .text-title { fill: var(--fg-title); }
+  .text-body  { fill: var(--fg); }
+  .text-sub   { fill: var(--fg-sub); }
+  .conn-line  { transition: stroke-width 0.15s; }
+  .conn-line:hover { stroke-width: 2.5; }
+
+  /* ─── Status Bar ─── */
+  .statusbar {
+    height: 22px; display: flex; align-items: center;
+    background: var(--bar-bg); border-top: 1px solid var(--bar-border);
+    padding: 0 12px; font-size: 11px; color: var(--fg-sub);
+    gap: 16px; user-select: none; position: fixed; bottom: 0;
+    left: 0; right: 0;
+  }
+  .statusbar-item { display: flex; align-items: center; gap: 4px; }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: #9ece6a; }
+
+  /* ─── Theme Toggle ─── */
+  .theme-toggle {
+    position: fixed; top: 4px; right: 150px;
+    width: 28px; height: 28px; border: none; border-radius: 4px;
+    background: transparent; color: var(--fg-sub); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999; font-size: 14px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,0.06); }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌓</button>
+
+<!-- Title Bar -->
+<div class="titlebar">
+  <div class="titlebar-title">DisplaySwitch</div>
+  <div class="titlebar-btns">
+    <button class="titlebar-btn">─</button>
+    <button class="titlebar-btn">□</button>
+    <button class="titlebar-btn close">✕</button>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div class="app-shell">
+  <!-- Activity Bar -->
+  <nav class="activity-bar">
+    <div class="activity-top">
+      <button class="activity-btn" title="Monitors" onclick="showView('monitors')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+      </button>
+      <button class="activity-btn active" title="Topology" onclick="showView('topology')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/>
+          <line x1="7.5" y1="12" x2="16.5" y2="6"/><line x1="7.5" y1="12" x2="16.5" y2="18"/>
+        </svg>
+      </button>
+      <button class="activity-btn" title="Profiles" onclick="showView('profiles')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="activity-bottom">
+      <button class="activity-btn" title="Refresh">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+        </svg>
+      </button>
+      <button class="activity-btn" title="Settings">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="main-area">
+    <div class="panel-header">
+      <span class="panel-title" id="panel-title">DISPLAY TOPOLOGY</span>
+    </div>
+    <div class="content-scroll" id="content"></div>
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div class="statusbar">
+  <div class="statusbar-item"><span class="pulse"></span> Synced</div>
+  <div class="statusbar-item">3 displays (1 internal + 2 external)</div>
+  <div class="statusbar-item">ALS: 320 lux</div>
+  <div class="statusbar-item" style="margin-left:auto">v2.0.0</div>
+</div>
+
+<script>
+// ─── Mock Data ───
+const mockDisplays = [
+  {
+    name: "Built-in Retina Display",
+    manufacturer_id: "APP", product_code: "9CF2",
+    connection_type: "eDP", is_internal: true,
+    resolution_str: "2560×1600", refresh_rate: 120,
+    brightness: 72, supports_hdr: false,
+    hdmi_version: null,
+    bandwidth: { bandwidth_str: "HBR3 32.4 Gbps" },
+    gpu: { formatted_name: "NVIDIA RTX 4070" }
+  },
+  {
+    name: "DELL U2723QE",
+    manufacturer_id: "DEL", product_code: "4233",
+    connection_type: "USB-C / DP Alt", is_internal: false,
+    resolution_str: "3840×2160", refresh_rate: 60,
+    brightness: 55, supports_hdr: true,
+    hdmi_version: null,
+    bandwidth: { bandwidth_str: "HBR2 21.6 Gbps" },
+    gpu: { formatted_name: "NVIDIA RTX 4070" }
+  },
+  {
+    name: "BenQ EW3270U",
+    manufacturer_id: "BNQ", product_code: "7F35",
+    connection_type: "HDMI", is_internal: false,
+    resolution_str: "3840×2160", refresh_rate: 60,
+    brightness: 40, supports_hdr: true,
+    hdmi_version: "HDMI 2.0",
+    bandwidth: { bandwidth_str: "TMDS 594 MHz" },
+    gpu: { formatted_name: "NVIDIA RTX 4070" }
+  }
+];
+
+// ─── Topology Renderer ───
+function connColor(type) {
+  const t = type.toLowerCase();
+  if (t.includes("usb-c") || t.includes("thunderbolt") || t.includes("usb4")) return "#e0af68";
+  if (t.includes("dp") || t.includes("displayport")) return "#9ece6a";
+  if (t.includes("hdmi")) return "#7aa2f7";
+  if (t.includes("edp") || t.includes("lvds")) return "#bb9af7";
+  return "#565a89";
+}
+
+function renderTopology(displays, container) {
+  // Group by GPU
+  const groups = new Map();
+  for (const d of displays) {
+    const key = d.gpu?.formatted_name ?? "Unknown GPU";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(d);
+  }
+
+  container.innerHTML = '';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'topology-container';
+
+  const cw = container.clientWidth - 32; // padding
+  const MARGIN = 20, NODE_GAP_Y = 16;
+  const gpuW = Math.max(100, Math.min(160, cw * 0.2));
+  const gpuH = 44;
+  const dispW = Math.max(140, Math.min(220, cw * 0.32));
+  const dispH = 54;
+  const gapX = Math.max(80, cw - gpuW - dispW);
+  const dispX = MARGIN + gpuW + gapX;
+  const fs = Math.max(8, Math.min(11, cw / 55));
+
+  for (const [gpuName, disps] of groups) {
+    const groupH = MARGIN * 2 + disps.length * (dispH + NODE_GAP_Y) - NODE_GAP_Y;
+    const gpuX = MARGIN;
+    const gpuY = MARGIN + ((disps.length * (dispH + NODE_GAP_Y) - NODE_GAP_Y) / 2) - gpuH / 2;
+
+    let svg = `<svg width="100%" viewBox="0 0 ${cw + MARGIN * 2} ${groupH}" preserveAspectRatio="xMidYMid meet" class="topology-svg">`;
+
+    // GPU node
+    svg += `<rect x="${gpuX}" y="${gpuY}" width="${gpuW}" height="${gpuH}" rx="4" class="node-gpu"/>`;
+    svg += `<text x="${gpuX + gpuW/2}" y="${gpuY + 17}" text-anchor="middle" class="text-title" font-size="${fs+1}">GPU</text>`;
+    const gpuLabel = gpuName.length > 18 ? gpuName.slice(0,18)+'…' : gpuName;
+    svg += `<text x="${gpuX + gpuW/2}" y="${gpuY + 33}" text-anchor="middle" class="text-sub" font-size="${fs-1}">${gpuLabel}</text>`;
+
+    // Displays
+    disps.forEach((d, i) => {
+      const dy = MARGIN + i * (dispH + NODE_GAP_Y);
+      const color = connColor(d.connection_type);
+      const x1 = gpuX + gpuW, y1 = gpuY + gpuH/2;
+      const x2 = dispX, y2 = dy + dispH/2;
+      const midX = (x1+x2)/2, midY = (y1+y2)/2;
+      const bw = d.bandwidth?.bandwidth_str ?? '';
+      const dash = d.is_internal ? '' : 'stroke-dasharray="6,3"';
+      const connLabel = d.hdmi_version ?? d.connection_type;
+
+      // Bezier
+      svg += `<path d="M${x1},${y1} C${x1+(x2-x1)*0.4},${y1} ${x2-(x2-x1)*0.4},${y2} ${x2},${y2}" fill="none" stroke="${color}" stroke-width="1.5" ${dash} class="conn-line"/>`;
+
+      // Badge
+      const badgeH = bw ? 28 : 18;
+      svg += `<rect x="${midX-36}" y="${midY-(bw?14:9)}" width="72" height="${badgeH}" rx="9" fill="var(--badge-bg)" fill-opacity="0.92"/>`;
+      svg += `<text x="${midX}" y="${midY+(bw?-3:4)}" text-anchor="middle" fill="${color}" font-size="${fs-1}" font-weight="500">${connLabel}</text>`;
+      if (bw) svg += `<text x="${midX}" y="${midY+10}" text-anchor="middle" class="text-sub" font-size="${fs-2}">${bw}</text>`;
+
+      // Display node
+      svg += `<rect x="${dispX}" y="${dy}" width="${dispW}" height="${dispH}" rx="4" class="node-display" stroke="${color}" stroke-width="1"/>`;
+      if (d.supports_hdr) svg += `<circle cx="${dispX+dispW-10}" cy="${dy+12}" r="3.5" fill="#e0af68" opacity="0.8"/>`;
+
+      const nameLabel = d.name.length > 18 ? d.name.slice(0,18)+'…' : d.name;
+      const prefix = d.is_internal ? '● ' : '';
+      svg += `<text x="${dispX+10}" y="${dy+17}" class="text-title" font-size="${fs}" font-weight="500">${prefix}${nameLabel}</text>`;
+      svg += `<text x="${dispX+10}" y="${dy+31}" class="text-body" font-size="${fs-1}">${d.resolution_str} · ${d.refresh_rate}Hz</text>`;
+      const briStr = d.brightness >= 0 ? ` · ${d.brightness}%` : '';
+      svg += `<text x="${dispX+10}" y="${dy+44}" class="text-sub" font-size="${fs-2}">${d.manufacturer_id} ${d.product_code}${briStr}</text>`;
+    });
+
+    svg += '</svg>';
+    wrapper.innerHTML += svg;
+  }
+
+  container.appendChild(wrapper);
+}
+
+// ─── View Switching ───
+function showView(view) {
+  document.querySelectorAll('.activity-btn').forEach((b, i) => {
+    b.classList.toggle('active', (view === 'monitors' && i === 0) || (view === 'topology' && i === 1) || (view === 'profiles' && i === 2));
+  });
+  const titles = { monitors: 'MONITORS', topology: 'DISPLAY TOPOLOGY', profiles: 'SCENE PROFILES' };
+  document.getElementById('panel-title').textContent = titles[view] || '';
+
+  const content = document.getElementById('content');
+  if (view === 'topology') {
+    renderTopology(mockDisplays, content);
+  } else if (view === 'monitors') {
+    content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--fg-sub)">Monitor cards would appear here in the live app.</div>';
+  } else {
+    content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--fg-sub)">Scene profiles would appear here in the live app.</div>';
+  }
+}
+
+// ─── Theme Toggle ───
+function toggleTheme() {
+  document.documentElement.classList.toggle('light');
+  document.documentElement.classList.toggle('dark');
+  showView(getCurrentView());
+}
+function getCurrentView() {
+  const btns = document.querySelectorAll('.activity-top .activity-btn');
+  if (btns[0].classList.contains('active')) return 'monitors';
+  if (btns[1].classList.contains('active')) return 'topology';
+  return 'profiles';
+}
+
+// ─── Init ───
+window.addEventListener('DOMContentLoaded', () => showView('topology'));
+window.addEventListener('resize', () => { if (getCurrentView() === 'topology') showView('topology'); });
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@
   import ProfileBar from "./lib/ProfileBar.svelte";
   import StatusBar from "./lib/StatusBar.svelte";
   import TopologyView from "./lib/TopologyView.svelte";
+  import TitleBar from "./lib/TitleBar.svelte";
   import type { DisplayInfo, AppConfig, Profile, PresetAction } from "./lib/types";
   import { loadConfig, saveConfig, saveActiveProfile, DEFAULT_CONFIG } from "./lib/configStore";
   import { applyTheme, watchSystemTheme } from "./lib/theme";
@@ -18,6 +19,10 @@
   let error = $state("");
   let showSettings = $state(false);
   let appConfig = $state<AppConfig>(structuredClone(DEFAULT_CONFIG));
+
+  // Platform detection for conditional title bar rendering
+  let platform = $state<"windows" | "macos" | "linux">("windows");
+  let isMaximized = $state(false);
 
   // Phase 7b: StatusBar / ALS / Topology state
   let ambientLux = $state(-1);
@@ -36,6 +41,34 @@
 
   // i18n reactivity: force re-render when locale changes
   let _localeVersion = $state(0);
+
+  /** Get the display ID for custom input name storage */
+  function displayId(d: DisplayInfo): string {
+    return (d.manufacturer_id || "") + "_" + (d.product_code || "");
+  }
+
+  /** Handle custom input name change from MonitorCard */
+  async function handleInputNameChange(display: DisplayInfo, vcpCode: number, newName: string | null) {
+    const id = displayId(display);
+    if (!id || id === "_") return;
+
+    const names = { ...(appConfig.custom_input_names[id] ?? {}) };
+    if (newName === null) {
+      delete names[String(vcpCode)];
+    } else {
+      names[String(vcpCode)] = newName;
+    }
+
+    const custom_input_names = { ...appConfig.custom_input_names };
+    if (Object.keys(names).length === 0) {
+      delete custom_input_names[id];
+    } else {
+      custom_input_names[id] = names;
+    }
+
+    appConfig = { ...appConfig, custom_input_names };
+    await saveConfig(appConfig);
+  }
 
   /** Check if running inside Tauri WebView */
   function isTauri(): boolean {
@@ -262,6 +295,7 @@
   let _syncTimer: ReturnType<typeof setInterval> | null = null;
   let _unlistenHotplug: (() => void) | null = null;
   let _unlistenHotkey: (() => void) | null = null;
+  let _unlistenMenuAction: (() => void) | null = null;
   let _unlistenSystemTheme: (() => void) | null = null;
   let _unlistenLocale: (() => void) | null = null;
   let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -277,6 +311,22 @@
       });
 
       if (isTauri()) {
+        // Detect platform for conditional title bar rendering
+        import("@tauri-apps/api/core").then(({ invoke }) => {
+          invoke<string>("get_platform").then((p) => {
+            platform = p as typeof platform;
+          });
+        });
+
+        // Track maximize state for Windows title bar icon
+        import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+          const win = getCurrentWindow();
+          win.isMaximized().then((m) => { isMaximized = m; });
+          win.onResized(() => {
+            win.isMaximized().then((m) => { isMaximized = m; });
+          });
+        });
+
         loadConfig().then((cfg) => {
           appConfig = cfg;
           registerHotkeys(cfg.hotkeys);
@@ -318,6 +368,16 @@
           }).then((fn) => {
             _unlistenHotkey = fn;
           });
+
+          // macOS native menu actions
+          listen<string>("menu-action", (event) => {
+            switch (event.payload) {
+              case "refresh": refresh(); break;
+              case "settings": showSettings = !showSettings; break;
+            }
+          }).then((fn) => {
+            _unlistenMenuAction = fn;
+          });
         });
       }
     });
@@ -327,6 +387,7 @@
       if (_debounceTimer) clearTimeout(_debounceTimer);
       if (_unlistenHotplug) _unlistenHotplug();
       if (_unlistenHotkey) _unlistenHotkey();
+      if (_unlistenMenuAction) _unlistenMenuAction();
       if (_unlistenSystemTheme) _unlistenSystemTheme();
       if (_unlistenLocale) _unlistenLocale();
       if (_alsCleanup) _alsCleanup();
@@ -337,7 +398,12 @@
 <!-- Hidden i18n trigger -->
 <span style="display:none">{_localeVersion}</span>
 
-<div class="app-shell">
+<!-- Windows custom title bar -->
+{#if platform === "windows"}
+  <TitleBar {isMaximized} />
+{/if}
+
+<div class="app-shell" class:has-titlebar={platform === "windows"}>
   <!-- ═══ Activity Bar (left icon strip, like VS Code) ═══ -->
   <nav class="activity-bar">
     <div class="activity-top">
@@ -441,9 +507,14 @@
 
         <div class="cards-list">
           {#each displays as display, i (display.device_path)}
-            <MonitorCard {display} onchange={(updates) => {
-              displays[i] = { ...displays[i], ...updates };
-            }} />
+            <MonitorCard
+              {display}
+              customInputNames={appConfig.custom_input_names[displayId(display)] ?? undefined}
+              onchange={(updates) => {
+                displays[i] = { ...displays[i], ...updates };
+              }}
+              onInputNameChange={(code, name) => handleInputNameChange(display, code, name)}
+            />
           {/each}
         </div>
 
@@ -559,6 +630,10 @@
     display: flex;
     height: 100vh;
     width: 100vw;
+  }
+
+  .app-shell.has-titlebar {
+    height: calc(100vh - 31px); /* 30px titlebar + 1px border */
   }
 
   /* ═══ Activity Bar (left, VS Code style) ═══ */

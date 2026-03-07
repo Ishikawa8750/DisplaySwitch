@@ -2,11 +2,23 @@
   import type { DisplayInfo } from "./types";
   import { t } from "./i18n";
 
-  let { display, onchange }: { display: DisplayInfo; onchange?: (updates: Partial<DisplayInfo>) => void } = $props();
+  let {
+    display,
+    customInputNames,
+    onchange,
+    onInputNameChange,
+  }: {
+    display: DisplayInfo;
+    customInputNames?: Record<string, string>;
+    onchange?: (updates: Partial<DisplayInfo>) => void;
+    onInputNameChange?: (vcpCode: number, newName: string | null) => void;
+  } = $props();
 
   let brightnessOverride = $state<number | null>(null);
   let brightness = $derived(brightnessOverride ?? display.brightness ?? 50);
   let statusMsg = $state("");
+  let editingInputCode = $state<number | null>(null);
+  let editingInputValue = $state("");
 
   // Auto-clear brightnessOverride after user stops dragging (sync with backend)
   let overrideClearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,7 +77,7 @@
     }
   }
 
-  const inputNames: Record<number, string> = {
+  const DEFAULT_INPUT_NAMES: Record<number, string> = {
     1:  "VGA-1",
     2:  "VGA-2",
     3:  "DVI-1",
@@ -86,6 +98,42 @@
     18: "HDMI-2",
     27: "USB-C",
   };
+
+  function getInputName(code: number): string {
+    const key = String(code);
+    if (customInputNames?.[key]) return customInputNames[key];
+    return DEFAULT_INPUT_NAMES[code] ?? `Input 0x${code.toString(16).toUpperCase()}`;
+  }
+
+  function startEditing(code: number) {
+    editingInputCode = code;
+    editingInputValue = getInputName(code);
+  }
+
+  function commitEdit(code: number) {
+    const trimmed = editingInputValue.trim();
+    const defaultName = DEFAULT_INPUT_NAMES[code] ?? `Input 0x${code.toString(16).toUpperCase()}`;
+    // If the name matches default or is empty, reset to default (remove custom)
+    if (!trimmed || trimmed === defaultName) {
+      onInputNameChange?.(code, null);
+    } else {
+      onInputNameChange?.(code, trimmed);
+    }
+    editingInputCode = null;
+  }
+
+  function resetInputName(code: number) {
+    onInputNameChange?.(code, null);
+    editingInputCode = null;
+  }
+
+  function resetAllInputNames() {
+    if (!display.supported_inputs) return;
+    for (const code of display.supported_inputs) {
+      onInputNameChange?.(code, null);
+    }
+    editingInputCode = null;
+  }
 </script>
 
 <article class="card">
@@ -178,15 +226,35 @@
       <span class="label">{t("card.input")}</span>
       <div class="btn-group">
         {#each display.supported_inputs as code}
-          <button
-            class:active={code === display.current_input}
-            onclick={() => switchInput(code)}
-          >
-            {inputNames[code] ?? `Input 0x${code.toString(16).toUpperCase()}`}
-            {#if code === display.current_input} ✓{/if}
-          </button>
+          {#if editingInputCode === code}
+            <span class="input-edit-wrap">
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                type="text"
+                class="input-name-edit"
+                bind:value={editingInputValue}
+                onkeydown={(e) => { if (e.key === 'Enter') commitEdit(code); if (e.key === 'Escape') editingInputCode = null; }}
+                autofocus
+              />
+              <button class="edit-action-btn" onclick={() => commitEdit(code)} title={t("input.save")}>✓</button>
+              <button class="edit-action-btn" onclick={() => resetInputName(code)} title={t("input.reset")}>↺</button>
+            </span>
+          {:else}
+            <button
+              class:active={code === display.current_input}
+              onclick={() => switchInput(code)}
+              ondblclick={(e) => { e.preventDefault(); startEditing(code); }}
+              title={t("input.dblclick_edit")}
+            >
+              {getInputName(code)}
+              {#if code === display.current_input} ✓{/if}
+            </button>
+          {/if}
         {/each}
       </div>
+      {#if customInputNames && Object.keys(customInputNames).length > 0}
+        <button class="reset-all-btn" onclick={resetAllInputNames} title={t("input.reset_all")}>↺</button>
+      {/if}
     </div>
   {/if}
 
@@ -302,6 +370,48 @@
     border-left: 2px solid #f7768e;
   }
 
+  .input-edit-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .input-name-edit {
+    width: 72px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: inherit;
+    border: 1px solid #7aa2f7;
+    border-radius: 3px;
+    background: #1a1b26;
+    color: #c0caf5;
+    outline: none;
+  }
+  .edit-action-btn {
+    padding: 2px 5px;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid #24283b;
+    border-radius: 3px;
+    color: #7aa2f7;
+    cursor: pointer;
+    font-family: inherit;
+    line-height: 1;
+  }
+  .edit-action-btn:hover { background: #24283b; }
+  .reset-all-btn {
+    padding: 2px 5px;
+    font-size: 12px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: #565a89;
+    cursor: pointer;
+    font-family: inherit;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .reset-all-btn:hover { color: #f7768e; border-color: #f7768e; }
+
   /* ── Light theme ── */
   :global(html.light) .card {
     background: #d5d6db;
@@ -336,4 +446,13 @@
     background: rgba(140, 67, 81, 0.08);
     border-left-color: #8c4351;
   }
+  :global(html.light) .input-name-edit {
+    background: #e8e9ee;
+    color: #343b58;
+    border-color: #34548a;
+  }
+  :global(html.light) .edit-action-btn { color: #34548a; }
+  :global(html.light) .edit-action-btn:hover { background: #c4c5ca; }
+  :global(html.light) .reset-all-btn { color: #8990b3; }
+  :global(html.light) .reset-all-btn:hover { color: #8c4351; border-color: #8c4351; }
 </style>

@@ -121,4 +121,7 @@ export interface AppConfig {
   // Phase 7b: Ambient Light Sensor
   als_enabled: boolean;           // auto-brightness via ALS
   als_interval_ms: number;        // ALS polling interval (default 10000)
+  // Custom input source names: displayId -> { vcpCode: label }
+  // e.g. { "BNQ_0x7950": { "15": "USB-C", "17": "HDMI-2" } }
+  custom_input_names: Record<string, Record<string, string>>;
 }

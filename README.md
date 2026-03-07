@@ -1,50 +1,128 @@
-# DisplaySwitch (Cross-Platform)
+# DisplaySwitch
 
-A modern GUI tool to switch monitor inputs and control brightness on Windows and macOS (Apple Silicon compatible).
+<p align="center">
+  <strong>Cross-platform display management — brightness, input switching, and topology visualization</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Tauri-2.10-blue?logo=tauri" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/Svelte-5-orange?logo=svelte" alt="Svelte 5" />
+  <img src="https://img.shields.io/badge/Rust-1.94-red?logo=rust" alt="Rust" />
+  <img src="https://img.shields.io/badge/C++-20-blueviolet?logo=cplusplus" alt="C++20" />
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-green" alt="Platform" />
+</p>
+
+---
+
+## Features
+
+| Category | Details |
+|---|---|
+| **Display Detection** | CCD API + Registry EDID + CEA-861 parsing (HDMI VSDB / HF-VSDB / HDR metadata) |
+| **Brightness Control** | DDC/CI VCP 0x10 for external monitors, WMI for laptop internal displays |
+| **Input Switching** | DDC/CI VCP 0x60 with full input enumeration (VGA / DVI / DP / HDMI / USB-C) |
+| **Custom Input Names** | Double-click to rename input sources per monitor, persistently stored |
+| **GPU Info** | WMI-based detection — model, VRAM, driver version |
+| **Hot-Plug** | Real-time display connect / disconnect via `WM_DISPLAYCHANGE` + `WM_DEVICECHANGE` |
+| **Topology View** | Adaptive SVG visualization: GPU → connection → display with bandwidth info |
+| **Global Hotkeys** | System-wide keyboard shortcuts for brightness, refresh, presets (even when minimized) |
+| **Scene Profiles** | Work / Gaming / Movie profiles with auto-trigger by display count or time schedule |
+| **Presets** | Quick-apply brightness + input combinations with one click |
+| **Auto-Brightness** | Ambient Light Sensor integration with logarithmic brightness curve |
+| **Theme** | Dark (Tokyo Night) / Light / System-follow modes |
+| **i18n** | English + 中文, auto-detect system locale |
+| **Auto-Start** | Launch on system boot (Windows Registry / macOS LaunchAgent) |
+| **Auto-Update** | GitHub Releases update check via `tauri-plugin-updater` |
+| **System Tray** | Minimize to tray, tray menu, double-click restore |
+
+## Architecture
+
+```
+┌────────────────────────────────────────────────────┐
+│  Svelte 5 Frontend (Vite 6)                        │
+│  App.svelte → MonitorCard / TopologyView / ...     │
+├────────────────────────────────────────────────────┤
+│  Tauri 2 Rust Backend                              │
+│  Commands: scan_monitors, set_brightness, ...      │
+│  libloading FFI → displayswitch_ffi.dll            │
+├────────────────────────────────────────────────────┤
+│  C++20 Native Core                                 │
+│  CCD / DDC/CI / EDID / WMI / VCP Controller       │
+└────────────────────────────────────────────────────┘
+```
 
 ## Prerequisites
 
-### Windows
+| Tool | Version | Notes |
+|---|---|---|
+| **Rust** | 1.94+ | `rustup install stable` |
+| **Node.js** | 18+ | For Svelte / Vite frontend build |
+| **Visual Studio 2022** | 17.x | MSVC C++20 + Windows SDK (Windows only) |
+| **CMake** | 3.22+ | For C++ native core build |
 
-- Python 3.x
-- No extra system tools required.
+## Build
 
-### macOS (Apple Silicon / M1 / M2)
+### 1. Build C++ native core
 
-- Python 3.x
-- **m1ddc**: This tool is required to send DDC commands on Apple Silicon.
-  - Install via Homebrew: `brew install m1ddc`
-  - Or manually download from: <https://github.com/waydabber/m1ddc>
+```bash
+cd core_native
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
 
-## Setup
+This produces `displayswitch_ffi.dll` (Windows) which is loaded at runtime by the Rust backend.
 
-1. **Install Dependencies**:
+### 2. Build & run the Tauri app
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+cd tauri_ui
+npm install
+npx tauri dev      # development with HMR
+npx tauri build    # production build → installer
+```
 
-2. **Run the Application**:
+The build produces platform-specific installers (`.msi` / `.nsis` on Windows, `.dmg` / `.app` on macOS).
 
-    ```bash
-    python main.py
-    ```
+## Project Structure
 
-## Usage
+```
+DisplaySwitch/
+├── core_native/                 # C++20 native library
+│   ├── include/displayswitch/   # Public headers (c_api.h, edid_parser.h, ...)
+│   ├── src/                     # Implementation
+│   │   ├── platform/windows/    # CCD, DDC/CI, WMI, EDID registry
+│   │   └── platform/macos/     # IOKit stubs (planned)
+│   └── tests/                   # Unit tests (EDID parser)
+├── tauri_ui/                    # Tauri desktop application
+│   ├── src/                     # Svelte 5 frontend
+│   │   ├── App.svelte           # Main application shell
+│   │   └── lib/                 # Components & utilities
+│   │       ├── MonitorCard.svelte
+│   │       ├── TopologyView.svelte
+│   │       ├── SettingsPanel.svelte
+│   │       ├── TitleBar.svelte
+│   │       ├── StatusBar.svelte
+│   │       ├── ProfileBar.svelte
+│   │       ├── configStore.ts
+│   │       ├── i18n.ts
+│   │       ├── theme.ts
+│   │       └── ambientLight.ts
+│   └── src-tauri/               # Rust backend
+│       ├── src/main.rs          # Tauri commands + FFI bridge
+│       └── Cargo.toml           # Dependencies
+├── .github/workflows/           # CI/CD (Windows + macOS)
+└── ROADMAP.md                   # Development roadmap
+```
 
-- **Switch Input**: Click the buttons to switch between Mac (USB-C) and Windows (HDMI).
-- **Brightness**: Use the slider to adjust the external monitor's brightness.
+## CI/CD
 
-## Configuration
+GitHub Actions builds on every push to `main`:
 
-The Input Source values are set to:
+- **Windows** — MSVC x64
+- **macOS arm64** — Apple Silicon
+- **macOS x86_64** — Intel
 
-- Mac (USB-C/DP): 15
-- Windows (HDMI2): 17
+## License
 
-(These defaults are based on your specific BenQ monitor scan. Edit `main.py` if needed.)
-
-## Troubleshooting (Mac)
-
-- Ensure your Mac has proper permissions to run `m1ddc` (sometimes requires running this app via Terminal with correct permissions).
+MIT
 

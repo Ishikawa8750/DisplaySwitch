@@ -1,13 +1,15 @@
 <!--
-  TopologyView — Phase 7
+  TopologyView — Phase 7 (Adaptive)
   Visual display topology: GPU → connection → display.
-  Pure SVG (no D3.js dependency). Shows Thunderbolt/USB-C/DP/HDMI chains.
+  Pure SVG, fully responsive. Auto-scales to container width.
 -->
 <script lang="ts">
   import type { DisplayInfo } from "./types";
-  import { t } from "./i18n";
 
   let { displays }: { displays: DisplayInfo[] } = $props();
+
+  // Container width for responsive layout
+  let containerWidth = $state(600);
 
   // Group displays by GPU
   let gpuGroups = $derived.by(() => {
@@ -20,15 +22,6 @@
     return groups;
   });
 
-  function connIcon(type: string): string {
-    const t = type.toLowerCase();
-    if (t.includes("thunderbolt") || t.includes("usb-c") || t.includes("usb4")) return "⚡";
-    if (t.includes("dp") || t.includes("displayport")) return "🔌";
-    if (t.includes("hdmi")) return "📺";
-    if (t.includes("edp") || t.includes("lvds")) return "💻";
-    return "🔗";
-  }
-
   function connColor(type: string): string {
     const t = type.toLowerCase();
     if (t.includes("thunderbolt") || t.includes("usb-c") || t.includes("usb4")) return "#e0af68";
@@ -38,138 +31,196 @@
     return "#565a89";
   }
 
-  function bwLabel(d: DisplayInfo): string {
-    if (!d.bandwidth?.bandwidth_str) return "";
-    return d.bandwidth.bandwidth_str;
+  function connLabel(d: DisplayInfo): string {
+    return d.hdmi_version ?? d.connection_type;
   }
 
-  // SVG layout constants
-  const GPU_W = 140;
-  const GPU_H = 48;
-  const DISPLAY_W = 180;
-  const DISPLAY_H = 56;
-  const GAP_X = 160;
-  const GAP_Y = 20;
-  const MARGIN = 24;
+  function bwLabel(d: DisplayInfo): string {
+    return d.bandwidth?.bandwidth_str ?? "";
+  }
 
-  let svgHeight = $derived.by(() => {
-    let maxGroupDisplays = 0;
-    for (const [, disps] of gpuGroups) {
-      if (disps.length > maxGroupDisplays) maxGroupDisplays = disps.length;
-    }
-    return Math.max(200, MARGIN * 2 + maxGroupDisplays * (DISPLAY_H + GAP_Y));
+  // Adaptive layout calculations — all derived from containerWidth
+  const MARGIN = 20;
+  const NODE_GAP_Y = 16;
+  const MIN_GAP_X = 80;
+
+  let layout = $derived.by(() => {
+    const w = containerWidth - MARGIN * 2;
+    // Node widths scale with container, clamped to reasonable bounds
+    const gpuW = Math.max(100, Math.min(160, w * 0.2));
+    const gpuH = 44;
+    const dispW = Math.max(140, Math.min(220, w * 0.32));
+    const dispH = 54;
+    // Gap between GPU and display column
+    const gapX = Math.max(MIN_GAP_X, w - gpuW - dispW);
+    // Display column X
+    const dispX = MARGIN + gpuW + gapX;
+    // Font sizes scale slightly
+    const baseFontSize = Math.max(8, Math.min(11, w / 55));
+
+    return { gpuW, gpuH, dispW, dispH, gapX, dispX, baseFontSize };
   });
 
-  let svgWidth = $derived(MARGIN * 2 + GPU_W + GAP_X + DISPLAY_W + 40);
+  // Truncate text to fit a given pixel width (approximate)
+  function truncate(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return text.slice(0, maxChars) + "…";
+  }
+
+  let maxGpuNameChars = $derived(Math.max(10, Math.floor(layout.gpuW / 7)));
+  let maxDispNameChars = $derived(Math.max(10, Math.floor(layout.dispW / 7)));
 </script>
 
 {#if displays.length > 0}
-  <div class="topology-container">
-    {#each [...gpuGroups] as [gpuName, gpuDisplays], gi}
-      <div class="gpu-group">
-        <svg
-          width={svgWidth}
-          height={MARGIN * 2 + gpuDisplays.length * (DISPLAY_H + GAP_Y) - GAP_Y}
-          class="topology-svg"
-        >
-          {#if true}
-          {@const gpuX = MARGIN}
-          {@const gpuY = MARGIN + ((gpuDisplays.length * (DISPLAY_H + GAP_Y) - GAP_Y) / 2) - GPU_H / 2}
+  <div class="topology-container" bind:clientWidth={containerWidth}>
+    {#each [...gpuGroups] as [gpuName, gpuDisplays]}
+      {@const { gpuW, gpuH, dispW, dispH, dispX, baseFontSize } = layout}
+      {@const groupH = MARGIN * 2 + gpuDisplays.length * (dispH + NODE_GAP_Y) - NODE_GAP_Y}
+      {@const gpuX = MARGIN}
+      {@const gpuY = MARGIN + ((gpuDisplays.length * (dispH + NODE_GAP_Y) - NODE_GAP_Y) / 2) - gpuH / 2}
 
-          <!-- GPU Node -->
-          <rect
-            x={gpuX} y={gpuY}
-            width={GPU_W} height={GPU_H}
-            rx="3" fill="#24283b" stroke="#7aa2f7" stroke-width="1"
+      <svg
+        width="100%"
+        viewBox={`0 0 ${containerWidth} ${groupH}`}
+        preserveAspectRatio="xMidYMid meet"
+        class="topology-svg"
+      >
+        <!-- GPU Node -->
+        <rect
+          x={gpuX} y={gpuY}
+          width={gpuW} height={gpuH}
+          rx="4" class="node-gpu"
+        />
+        <text x={gpuX + gpuW / 2} y={gpuY + 17}
+          text-anchor="middle" class="text-title" font-size={baseFontSize + 1}>
+          GPU
+        </text>
+        <text x={gpuX + gpuW / 2} y={gpuY + 33}
+          text-anchor="middle" class="text-sub" font-size={baseFontSize - 1}>
+          {truncate(gpuName, maxGpuNameChars)}
+        </text>
+
+        <!-- Display Nodes + Connections -->
+        {#each gpuDisplays as disp, di}
+          {@const dy = MARGIN + di * (dispH + NODE_GAP_Y)}
+          {@const color = connColor(disp.connection_type)}
+          {@const x1 = gpuX + gpuW}
+          {@const y1 = gpuY + gpuH / 2}
+          {@const x2 = dispX}
+          {@const y2 = dy + dispH / 2}
+          {@const midX = (x1 + x2) / 2}
+          {@const midY = (y1 + y2) / 2}
+
+          <!-- Bezier connection -->
+          <path
+            d={`M${x1},${y1} C${x1 + (x2 - x1) * 0.4},${y1} ${x2 - (x2 - x1) * 0.4},${y2} ${x2},${y2}`}
+            fill="none" stroke={color} stroke-width="1.5"
+            stroke-dasharray={disp.is_internal ? "none" : "6,3"}
+            class="conn-line"
           />
-          <text x={gpuX + GPU_W / 2} y={gpuY + 18} text-anchor="middle" fill="#c0caf5" font-size="10" font-weight="600">
-            GPU
+
+          <!-- Connection badge -->
+          <rect
+            x={midX - 36} y={midY - (bwLabel(disp) ? 14 : 9)}
+            width="72" height={bwLabel(disp) ? 28 : 18}
+            rx="9" fill="var(--badge-bg)" fill-opacity="0.92"
+          />
+          <text x={midX} y={midY + (bwLabel(disp) ? -3 : 4)}
+            text-anchor="middle" fill={color}
+            font-size={baseFontSize - 1} font-weight="500">
+            {connLabel(disp)}
           </text>
-          <text x={gpuX + GPU_W / 2} y={gpuY + 34} text-anchor="middle" fill="#565a89" font-size="9">
-            {gpuName.length > 18 ? gpuName.slice(0, 18) + "…" : gpuName}
-          </text>
-
-          <!-- Display Nodes + Connection Lines -->
-          {#each gpuDisplays as disp, di}
-            {@const dx = MARGIN + GPU_W + GAP_X}
-            {@const dy = MARGIN + di * (DISPLAY_H + GAP_Y)}
-            {@const color = connColor(disp.connection_type)}
-            {@const midX = (gpuX + GPU_W + dx) / 2}
-            {@const midY = (gpuY + GPU_H / 2 + dy + DISPLAY_H / 2) / 2}
-
-            <!-- Connection line -->
-            <line
-              x1={gpuX + GPU_W}
-              y1={gpuY + GPU_H / 2}
-              x2={dx}
-              y2={dy + DISPLAY_H / 2}
-              stroke={color}
-              stroke-width="1.5"
-              stroke-dasharray={disp.is_internal ? "none" : "6,3"}
-            />
-
-            <!-- Connection label -->
-            <text x={midX} y={midY - 6} text-anchor="middle" fill={color} font-size="9" font-weight="500">
-              {connIcon(disp.connection_type)} {disp.hdmi_version ?? disp.connection_type}
+          {#if bwLabel(disp)}
+            <text x={midX} y={midY + 10}
+              text-anchor="middle" class="text-sub" font-size={baseFontSize - 2}>
+              {bwLabel(disp)}
             </text>
-            {#if bwLabel(disp)}
-              <text x={midX} y={midY + 6} text-anchor="middle" fill="#565a89" font-size="8">
-                {bwLabel(disp)}
-              </text>
-            {/if}
-
-            <!-- Display node -->
-            <rect
-              x={dx} y={dy}
-              width={DISPLAY_W} height={DISPLAY_H}
-              rx="3" fill="#1a1b26" stroke={color} stroke-width="1"
-            />
-            <text x={dx + 10} y={dy + 18} fill="#c0caf5" font-size="10" font-weight="500">
-              {disp.is_internal ? "▪" : "▫"} {disp.name.length > 16 ? disp.name.slice(0, 16) + "…" : disp.name}
-            </text>
-            <text x={dx + 10} y={dy + 32} fill="#a9b1d6" font-size="9">
-              {disp.resolution_str} | {disp.refresh_rate.toFixed(0)}Hz
-            </text>
-            <text x={dx + 10} y={dy + 46} fill="#565a89" font-size="8">
-              {disp.manufacturer_id} {disp.product_code}
-              {#if disp.brightness >= 0} | {disp.brightness}%{/if}
-            </text>
-          {/each}
           {/if}
-        </svg>
-      </div>
+
+          <!-- Display node -->
+          <rect
+            x={dispX} y={dy}
+            width={dispW} height={dispH}
+            rx="4" class="node-display" stroke={color} stroke-width="1"
+          />
+          <!-- HDR / internal indicator dot -->
+          {#if disp.supports_hdr}
+            <circle cx={dispX + dispW - 10} cy={dy + 12} r="3.5" fill="#e0af68" opacity="0.8" />
+          {/if}
+
+          <text x={dispX + 10} y={dy + 17}
+            class="text-title" font-size={baseFontSize} font-weight="500">
+            {disp.is_internal ? "● " : ""}{truncate(disp.name, maxDispNameChars)}
+          </text>
+          <text x={dispX + 10} y={dy + 31}
+            class="text-body" font-size={baseFontSize - 1}>
+            {disp.resolution_str} · {disp.refresh_rate.toFixed(0)}Hz
+          </text>
+          <text x={dispX + 10} y={dy + 44}
+            class="text-sub" font-size={baseFontSize - 2}>
+            {disp.manufacturer_id} {disp.product_code}{#if disp.brightness >= 0} · {disp.brightness}%{/if}
+          </text>
+        {/each}
+      </svg>
     {/each}
   </div>
 {/if}
 
 <style>
   .topology-container {
-    margin-top: 4px;
-  }
-
-  .gpu-group {
-    margin-bottom: 8px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .topology-svg {
     display: block;
     border: 1px solid #232433;
-    border-radius: 3px;
+    border-radius: 6px;
     background: #16161e;
-    overflow: visible;
+    --badge-bg: #1a1b26;
   }
 
   :global(html.light) .topology-svg {
     background: #e9e9ec;
     border-color: #c4c5ca;
+    --badge-bg: #e9e9ec;
   }
 
-  :global(html.light) .topology-svg rect {
+  /* GPU node */
+  .node-gpu {
+    fill: #24283b;
+    stroke: #7aa2f7;
+    stroke-width: 1;
+  }
+  :global(html.light) .node-gpu {
     fill: #d5d6db;
     stroke: #34548a;
   }
 
-  :global(html.light) .topology-svg text {
-    fill: #343b58;
+  /* Display node */
+  .node-display {
+    fill: #1a1b26;
+  }
+  :global(html.light) .node-display {
+    fill: #d5d6db;
+  }
+
+  /* Text classes */
+  .text-title { fill: #c0caf5; }
+  .text-body  { fill: #a9b1d6; }
+  .text-sub   { fill: #565a89; }
+
+  :global(html.light) .text-title { fill: #343b58; }
+  :global(html.light) .text-body  { fill: #4c505e; }
+  :global(html.light) .text-sub   { fill: #8990b3; }
+
+  /* Connection hover */
+  .conn-line {
+    transition: stroke-width 0.15s;
+  }
+  .conn-line:hover {
+    stroke-width: 2.5;
   }
 </style>

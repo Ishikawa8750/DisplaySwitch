@@ -261,8 +261,9 @@ public:
         close();
         displays_.clear();
 
-        // Re-read CCD info (may have changed if monitors were plugged/unplugged)
-        ccd_map_ = get_ccd_map();
+        // Re-read registry EDID + CCD info (may have changed if monitors were plugged/unplugged)
+        edid_map_ = read_all_edid_from_registry();
+        ccd_map_  = get_ccd_map();
 
         // Enumerate monitors
         EnumDisplayMonitors(nullptr, nullptr, monitor_enum_proc, reinterpret_cast<LPARAM>(this));
@@ -327,6 +328,7 @@ private:
     std::unique_ptr<GPUDetector> gpu_detector_;
     std::map<std::string, std::vector<uint8_t>> edid_map_;
     std::map<std::string, CCDInfo> ccd_map_;
+    std::map<std::string, std::vector<int>> cached_inputs_; // manufacturer_product -> supported inputs
     std::vector<DisplayInfo> displays_;
 
     static BOOL CALLBACK monitor_enum_proc(HMONITOR hMon, HDC, LPRECT, LPARAM ctx) {
@@ -451,10 +453,19 @@ private:
                 Sleep(40);
 
                 // 3. Parse the MCCS Capabilities string (SLOW — 1-5 sec)
-                std::string caps = get_monitor_capabilities(
-                    static_cast<HANDLE>(d.physical_handle));
+                //    Retry up to 2 times if it fails (DDC/CI bus can be flaky)
+                std::string caps;
+                for (int retry = 0; retry < 2 && caps.empty(); ++retry) {
+                    if (retry > 0) Sleep(200);
+                    caps = get_monitor_capabilities(
+                        static_cast<HANDLE>(d.physical_handle));
+                }
                 if (!caps.empty()) {
                     d.supported_inputs = parse_capabilities_vcp_values(caps, 0x60);
+                } else if (auto it = cached_inputs_.find(d.manufacturer_id + "_" + d.product_code);
+                           it != cached_inputs_.end()) {
+                    // Use cached supported_inputs from a previous successful read
+                    d.supported_inputs = it->second;
                 }
 
                 // Always include current input in the list
@@ -464,6 +475,13 @@ private:
                     if (it == d.supported_inputs.end())
                         d.supported_inputs.push_back(d.current_input);
                     std::sort(d.supported_inputs.begin(), d.supported_inputs.end());
+                }
+
+                // Cache successful reads for future fallback
+                if (!d.supported_inputs.empty()) {
+                    std::string cache_key = d.manufacturer_id + "_" + d.product_code;
+                    if (!cache_key.empty() && cache_key != "_")
+                        cached_inputs_[cache_key] = d.supported_inputs;
                 }
             } else if (d.is_internal) {
                 // Internal display: use WMI for brightness (DDC/CI not available)
