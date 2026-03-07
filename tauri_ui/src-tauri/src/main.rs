@@ -424,8 +424,9 @@ impl Drop for NativeCore {
 // ─── Tauri Commands ─────────────────────────────────────────────────────
 
 #[tauri::command]
-fn scan_monitors(state: tauri::State<'_, Mutex<NativeCore>>) -> Result<Vec<DisplayInfo>, String> {
-    let core = state.lock().map_err(|e| format!("Lock: {}", e))?;
+fn scan_monitors(state: tauri::State<'_, Mutex<Option<NativeCore>>>) -> Result<Vec<DisplayInfo>, String> {
+    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let core = guard.as_ref().ok_or("Native core not available – display library failed to load")?;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| core.scan())) {
         Ok(result) => result,
         Err(_) => Err("Internal error: scan panicked".to_string()),
@@ -434,11 +435,12 @@ fn scan_monitors(state: tauri::State<'_, Mutex<NativeCore>>) -> Result<Vec<Displ
 
 #[tauri::command]
 fn set_brightness(
-    state: tauri::State<'_, Mutex<NativeCore>>,
+    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
     display_index: i32,
     level: i32,
 ) -> Result<(), String> {
-    let core = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let core = guard.as_ref().ok_or("Native core not available")?;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         core.set_brightness(display_index, level)
     })) {
@@ -449,13 +451,14 @@ fn set_brightness(
 
 #[tauri::command]
 fn set_input(
-    state: tauri::State<'_, Mutex<NativeCore>>,
+    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
     display_index: i32,
     input_code: i32,
 ) -> Result<i32, String> {
     // Step 1: send the set_input command (hold lock briefly)
     {
-        let core = state.lock().map_err(|e| format!("Lock: {}", e))?;
+        let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+        let core = guard.as_ref().ok_or("Native core not available")?;
         core.set_input(display_index, input_code)?;
     } // <-- mutex released here
 
@@ -463,7 +466,8 @@ fn set_input(
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Step 3: re-acquire lock to read back the confirmed input
-    let core = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let core = guard.as_ref().ok_or("Native core not available")?;
     let confirmed = core.get_input(display_index);
     Ok(confirmed)
 }
@@ -471,12 +475,16 @@ fn set_input(
 /// Get brightness for a single display without full rescan (fast path).
 #[tauri::command]
 fn get_brightness(
-    state: tauri::State<'_, Mutex<NativeCore>>,
+    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
     display_index: i32,
 ) -> Result<i32, String> {
-    let core = match state.lock() {
+    let guard = match state.lock() {
         Ok(c) => c,
-        Err(_) => return Ok(-1), // Lock poisoned — return safe default
+        Err(_) => return Ok(-1),
+    };
+    let core = match guard.as_ref() {
+        Some(c) => c,
+        None => return Ok(-1),
     };
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         (core.fn_get_brightness)(core.detector, display_index)
@@ -489,12 +497,16 @@ fn get_brightness(
 /// Get current input source for a single display without full rescan.
 #[tauri::command]
 fn get_input(
-    state: tauri::State<'_, Mutex<NativeCore>>,
+    state: tauri::State<'_, Mutex<Option<NativeCore>>>,
     display_index: i32,
 ) -> Result<i32, String> {
-    let core = match state.lock() {
+    let guard = match state.lock() {
         Ok(c) => c,
-        Err(_) => return Ok(-1), // Lock poisoned — return safe default
+        Err(_) => return Ok(-1),
+    };
+    let core = match guard.as_ref() {
+        Some(c) => c,
+        None => return Ok(-1),
     };
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         core.get_input(display_index)
@@ -931,7 +943,16 @@ mod hotplug {
 // ─── main ───────────────────────────────────────────────────────────────
 
 fn main() {
-    let core = NativeCore::new().expect("Failed to load displayswitch_ffi.dll");
+    let core = match NativeCore::new() {
+        Ok(c) => {
+            eprintln!("[NativeCore] Loaded successfully");
+            Some(c)
+        }
+        Err(e) => {
+            eprintln!("[NativeCore] Failed to load: {}. Running in UI-only mode.", e);
+            None
+        }
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
