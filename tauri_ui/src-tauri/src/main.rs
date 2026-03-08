@@ -1099,6 +1099,26 @@ fn main() {
             let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("Failed to load tray icon");
 
+            // Create the tray popup window (macOS only, hidden by default)
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::WebviewWindowBuilder;
+                let _popup = WebviewWindowBuilder::new(
+                    app,
+                    "tray_popup",
+                    tauri::WebviewUrl::App("index.html".into()),
+                )
+                .title("DisplaySwitch")
+                .inner_size(520.0, 220.0)
+                .decorations(false)
+                .resizable(false)
+                .skip_taskbar(true)
+                .always_on_top(true)
+                .visible(false)
+                .transparent(true)
+                .build()?;
+            }
+
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
                 .menu(&menu)
@@ -1120,14 +1140,41 @@ fn main() {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
+                        position,
+                        rect,
                         ..
                     } = event
                     {
                         let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.unminimize();
-                            let _ = w.set_focus();
+
+                        #[cfg(target_os = "macos")]
+                        {
+                            use tauri::{LogicalPosition, PhysicalPosition};
+                            // Toggle the tray popup on macOS
+                            if let Some(popup) = app.get_webview_window("tray_popup") {
+                                let visible = popup.is_visible().unwrap_or(false);
+                                if visible {
+                                    let _ = popup.hide();
+                                } else {
+                                    // Position below the tray icon, centered horizontally
+                                    let popup_width = 520.0_f64;
+                                    let icon_center_x = rect.position.x + rect.size.width / 2.0;
+                                    let x = (icon_center_x - popup_width / 2.0).max(0.0);
+                                    let y = rect.position.y + rect.size.height + 4.0;
+                                    let _ = popup.set_position(PhysicalPosition::new(x as i32, y as i32));
+                                    let _ = popup.show();
+                                    let _ = popup.set_focus();
+                                }
+                            }
+                        }
+
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
                         }
                     }
                 })

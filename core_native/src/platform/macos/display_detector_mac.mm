@@ -1033,6 +1033,20 @@ public:
             if (!is_builtin) {
                 int inp = ddc_read(did, 0x60); // VCP 0x60 = Input Select
                 d.current_input = inp;
+
+                // Standard MCCS VCP 0x60 input source codes for modern monitors
+                d.supported_inputs = {
+                    15,  // DisplayPort-1 (0x0F)
+                    16,  // DisplayPort-2 (0x10)
+                    17,  // HDMI-1 (0x11)
+                    18,  // HDMI-2 (0x12)
+                };
+                // Ensure current input is in the list
+                if (inp > 0) {
+                    bool found = false;
+                    for (int si : d.supported_inputs) { if (si == inp) { found = true; break; } }
+                    if (!found) d.supported_inputs.push_back(inp);
+                }
             }
 
             std::cerr << "[DisplaySwitch] Display " << i << ": " << d.name
