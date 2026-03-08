@@ -1200,19 +1200,44 @@ fn main() {
             #[cfg(target_os = "macos")]
             {
                 use tauri::WebviewWindowBuilder;
-                let _popup = WebviewWindowBuilder::new(
+                let popup = WebviewWindowBuilder::new(
                     app,
                     "tray_popup",
                     tauri::WebviewUrl::App("index.html".into()),
                 )
                 .title("DisplaySwitch")
-                .inner_size(320.0, 520.0)
+                .inner_size(328.0, 520.0)
                 .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .background_color(tauri::window::Color(0, 0, 0, 0))
                 .resizable(false)
                 .skip_taskbar(true)
                 .always_on_top(true)
                 .visible(false)
                 .build()?;
+
+                // Force full transparency on NSWindow + WKWebView via ObjC runtime
+                popup.with_webview(|webview| {
+                    use objc2_app_kit::NSColor;
+                    use objc2_foundation::{NSNumber, NSString};
+                    unsafe {
+                        // ── NSWindow: opaque=NO, backgroundColor=clear, shadow=NO ──
+                        let ns_window_ptr = webview.ns_window();
+                        let ns_window: &objc2_app_kit::NSWindow =
+                            &*(ns_window_ptr as *const objc2_app_kit::NSWindow);
+                        ns_window.setOpaque(false);
+                        ns_window.setBackgroundColor(Some(&NSColor::clearColor()));
+                        ns_window.setHasShadow(false);
+
+                        // ── WKWebView: drawsBackground=NO ──
+                        let wk_ptr = webview.inner();
+                        let wk: &objc2::runtime::AnyObject = &*(wk_ptr as *const _);
+                        let no = NSNumber::numberWithBool(false);
+                        let key = NSString::from_str("drawsBackground");
+                        let _: () = objc2::msg_send![wk, setValue: &*no, forKey: &*key];
+                    }
+                }).ok();
             }
 
             // On macOS, no native menu so left-click fires on_tray_icon_event for the popup.
@@ -1265,7 +1290,7 @@ fn main() {
                                 if visible {
                                     let _ = popup.hide();
                                 } else {
-                                    let popup_width = 320.0_f64;
+                                    let popup_width = 328.0_f64;
                                     let x = (position.x - popup_width / 2.0).max(0.0);
                                     let y = position.y + 4.0;
                                     let _ = popup.set_position(PhysicalPosition::new(x as i32, y as i32));

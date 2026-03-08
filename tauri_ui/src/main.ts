@@ -1,5 +1,8 @@
 import { mount } from "svelte";
 
+// Disable browser context menu globally
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
 async function bootstrap() {
   const target = document.getElementById("app")!;
 

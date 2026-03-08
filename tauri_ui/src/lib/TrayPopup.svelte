@@ -88,8 +88,9 @@
       error = e?.message ?? String(e);
     }
     loading = false;
-    // Auto-resize after content renders
-    requestAnimationFrame(() => resizeToFit());
+    // Auto-resize after content renders (double rAF + setTimeout fallback)
+    requestAnimationFrame(() => requestAnimationFrame(() => resizeToFit()));
+    setTimeout(() => resizeToFit(), 150);
     // Load HDR states
     loadHdrStates();
   }
@@ -280,8 +281,10 @@
       const win = getCurrentWindow();
       const popup = document.querySelector('.popup') as HTMLElement;
       if (popup) {
+        // 4px body padding on each side = 8px total vertical
         const height = Math.min(popup.scrollHeight + 8, 600);
-        await win.setSize(new (await import("@tauri-apps/api/dpi")).LogicalSize(320, height));
+        const { LogicalSize } = await import("@tauri-apps/api/dpi");
+        await win.setSize(new LogicalSize(328, height));
       }
     } catch {}
   }
@@ -429,8 +432,7 @@
                       class:active={code === d.current_input}
                       class:custom={hasCustomName(d, code)}
                       onclick={() => switchInput(idx, code)}
-                      oncontextmenu={(e) => openContextMenu(e, code, idx)}
-                      title="Click to switch · Right-click to rename"
+                      title="Click to switch"
                     >
                       <span class="chip-label">{getInputName(d, code)}</span>
                       {#if code === d.current_input}
@@ -488,7 +490,7 @@
 <style>
   :global(body) {
     margin: 0;
-    padding: 0;
+    padding: 4px;
     background: transparent;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { DisplayInfo } from "./types";
   import { t } from "./i18n";
+  import RenameDialog from "./RenameDialog.svelte";
 
   let {
     display,
@@ -25,6 +26,7 @@
   let editingInputValue = $state("");
   let editingDisplayName = $state(false);
   let editingDisplayNameValue = $state("");
+  let showRenameDialog = $state(false);
 
   // Context menu for input rename
   let contextMenu = $state<{ x: number; y: number; code: number } | null>(null);
@@ -273,7 +275,7 @@
           </span>
         {:else}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <span class="display-name-text" oncontextmenu={openHeaderContextMenu}>{getDisplayName()}</span>
+          <span class="display-name-text">{getDisplayName()}</span>
         {/if}
       </h2>
       <span class="subtitle">
@@ -283,6 +285,12 @@
         {/if}
       </span>
     </div>
+    <button class="header-edit-btn" onclick={() => showRenameDialog = true} title={t("input.rename")}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+        <path d="m15 5 4 4"/>
+      </svg>
+    </button>
   </div>
 
   <!-- Info Grid -->
@@ -389,8 +397,7 @@
               class:active={code === display.current_input}
               class:custom-named={hasCustomName(code)}
               onclick={() => switchInput(code)}
-              oncontextmenu={(e) => openContextMenu(e, code)}
-              title={t("input.right_click_edit")}
+              title="Click to switch"
             >
               {getInputName(code)}
               {#if code === display.current_input} ✓{/if}
@@ -443,6 +450,21 @@
   {/if}
 </article>
 
+{#if showRenameDialog}
+  <RenameDialog
+    displayName={getDisplayName()}
+    originalDisplayName={display.name}
+    inputCodes={display.supported_inputs ?? []}
+    getInputName={getInputName}
+    getDefaultInputName={(code) => DEFAULT_INPUT_NAMES[code] ?? `Input 0x${code.toString(16).toUpperCase()}`}
+    hasCustomName={hasCustomName}
+    customDisplayName={customDisplayName ?? null}
+    onInputNameChange={onInputNameChange}
+    onDisplayNameChange={onDisplayNameChange}
+    onclose={() => showRenameDialog = false}
+  />
+{/if}
+
 <style>
   .card {
     background: rgba(255, 255, 255, 0.04);
@@ -467,6 +489,25 @@
     gap: 12px;
     align-items: center;
     margin-bottom: 14px;
+  }
+  .header-edit-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: rgba(169, 177, 214, 0.3);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .header-edit-btn:hover {
+    color: #7aa2f7;
+    background: rgba(122, 162, 247, 0.1);
+    border-color: rgba(122, 162, 247, 0.2);
   }
   .icon-wrap {
     width: 36px;
