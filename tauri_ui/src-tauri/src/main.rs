@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::path::PathBuf;
 use std::sync::Mutex;
+#[cfg(target_os = "windows")]
+use std::sync::Arc;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
