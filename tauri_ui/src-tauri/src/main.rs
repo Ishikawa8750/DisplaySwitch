@@ -1115,7 +1115,6 @@ fn main() {
                 .skip_taskbar(true)
                 .always_on_top(true)
                 .visible(false)
-                .transparent(true)
                 .build()?;
             }
 
@@ -1141,7 +1140,6 @@ fn main() {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
                         position,
-                        rect,
                         ..
                     } = event
                     {
@@ -1149,18 +1147,17 @@ fn main() {
 
                         #[cfg(target_os = "macos")]
                         {
-                            use tauri::{LogicalPosition, PhysicalPosition};
+                            use tauri::PhysicalPosition;
                             // Toggle the tray popup on macOS
                             if let Some(popup) = app.get_webview_window("tray_popup") {
                                 let visible = popup.is_visible().unwrap_or(false);
                                 if visible {
                                     let _ = popup.hide();
                                 } else {
-                                    // Position below the tray icon, centered horizontally
+                                    // Position below the click, centered horizontally
                                     let popup_width = 520.0_f64;
-                                    let icon_center_x = rect.position.x + rect.size.width / 2.0;
-                                    let x = (icon_center_x - popup_width / 2.0).max(0.0);
-                                    let y = rect.position.y + rect.size.height + 4.0;
+                                    let x = (position.x - popup_width / 2.0).max(0.0);
+                                    let y = position.y + 4.0;
                                     let _ = popup.set_position(PhysicalPosition::new(x as i32, y as i32));
                                     let _ = popup.show();
                                     let _ = popup.set_focus();
