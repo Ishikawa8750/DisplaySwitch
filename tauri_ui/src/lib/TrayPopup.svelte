@@ -19,6 +19,10 @@
   let editingInput = $state<{ code: number; displayIdx: number } | null>(null);
   let editingValue = $state("");
 
+  // Display rename
+  let editingDisplayIdx = $state<number | null>(null);
+  let editingDisplayValue = $state("");
+
   function displayId(d: DisplayInfo): string {
     return (d.manufacturer_id || "") + "_" + (d.product_code || "");
   }
@@ -45,7 +49,18 @@
     return (Math.sqrt(w * w + h * h)).toFixed(0) + '"';
   }
 
+  function getCustomDisplayName(d: DisplayInfo): string | null {
+    if (!appConfig) return null;
+    return appConfig.custom_display_names?.[displayId(d)] ?? null;
+  }
+
   function displayLabel(d: DisplayInfo): string {
+    // Check custom display name first
+    const custom = getCustomDisplayName(d);
+    if (custom) {
+      const size = diagonalInches(d);
+      return size ? `${size} ${custom}` : custom;
+    }
     if (d.is_internal) return d.name || "Built-in Display";
     const size = diagonalInches(d);
     const name = d.name && d.name !== "Unknown Display" ? d.name : "";
@@ -175,6 +190,52 @@
     contextMenu = null;
   }
 
+  // Display rename
+  function startDisplayRename(idx: number) {
+    const d = displays[idx];
+    editingDisplayIdx = idx;
+    editingDisplayValue = getCustomDisplayName(d) || d.name || "";
+  }
+
+  async function commitDisplayRename(idx: number) {
+    if (!appConfig) return;
+    const d = displays[idx];
+    const id = displayId(d);
+    if (!id || id === "_") return;
+
+    const trimmed = editingDisplayValue.trim();
+    const custom_display_names = { ...(appConfig.custom_display_names ?? {}) };
+
+    if (!trimmed || trimmed === d.name) {
+      delete custom_display_names[id];
+    } else {
+      custom_display_names[id] = trimmed;
+    }
+
+    appConfig = { ...appConfig, custom_display_names };
+    await saveConfig(appConfig);
+    editingDisplayIdx = null;
+  }
+
+  // Show main window
+  async function showMainWindow() {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("show_main_window");
+      // Hide popup
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().hide();
+    } catch {}
+  }
+
+  // Quit app
+  async function quitApp() {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("exit_app");
+    } catch {}
+  }
+
   // Auto-hide popup on blur
   async function handleBlur() {
     try {
@@ -236,7 +297,22 @@
               {/if}
             </div>
             <div class="header-text">
-              <span class="display-name">{displayLabel(d)}</span>
+              {#if editingDisplayIdx === idx}
+                <span class="display-name-edit">
+                  <!-- svelte-ignore a11y_autofocus -->
+                  <input
+                    type="text"
+                    class="name-edit-field"
+                    bind:value={editingDisplayValue}
+                    onkeydown={(e) => { if (e.key === 'Enter') commitDisplayRename(idx); if (e.key === 'Escape') editingDisplayIdx = null; }}
+                    autofocus
+                  />
+                  <button class="name-edit-confirm" onclick={() => commitDisplayRename(idx)}>✓</button>
+                </span>
+              {:else}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span class="display-name" ondblclick={() => startDisplayRename(idx)}>{displayLabel(d)}</span>
+              {/if}
               <span class="display-meta">
                 {d.resolution_str}{d.refresh_rate > 0 ? ` · ${d.refresh_rate.toFixed(0)}Hz` : ""}
                 {#if !d.is_internal && d.connection_type && d.connection_type !== "External"}
@@ -309,6 +385,26 @@
           {/if}
         </div>
       {/each}
+    </div>
+
+    <!-- Action Bar -->
+    <div class="action-bar">
+      <button class="action-btn" onclick={showMainWindow}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <span>Show Window</span>
+      </button>
+      <div class="action-sep"></div>
+      <button class="action-btn quit" onclick={quitApp}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/>
+          <line x1="12" y1="2" x2="12" y2="12"/>
+        </svg>
+        <span>Quit</span>
+      </button>
     </div>
   {/if}
 
@@ -662,5 +758,97 @@
   .ctx-item:hover {
     background: rgba(10, 132, 255, 0.25);
     color: #fff;
+  }
+
+  /* Display name edit */
+  .display-name {
+    cursor: default;
+  }
+
+  .display-name-edit {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .name-edit-field {
+    width: 140px;
+    padding: 2px 6px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid rgba(10, 132, 255, 0.5);
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    outline: none;
+  }
+
+  .name-edit-field:focus {
+    border-color: rgba(10, 132, 255, 0.8);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.15);
+  }
+
+  .name-edit-confirm {
+    padding: 2px 6px;
+    font-size: 12px;
+    background: rgba(10, 132, 255, 0.3);
+    border: none;
+    border-radius: 4px;
+    color: #64b5ff;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .name-edit-confirm:hover {
+    background: rgba(10, 132, 255, 0.45);
+  }
+
+  /* Action Bar */
+  .action-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-top: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .action-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 0;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+
+  .action-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  .action-btn:active {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .action-btn.quit:hover {
+    background: rgba(255, 80, 80, 0.12);
+    color: #ff6b6b;
+  }
+
+  .action-sep {
+    width: 1px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
   }
 </style>

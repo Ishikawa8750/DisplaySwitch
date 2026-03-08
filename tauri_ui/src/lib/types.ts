@@ -124,4 +124,7 @@ export interface AppConfig {
   // Custom input source names: displayId -> { vcpCode: label }
   // e.g. { "BNQ_0x7950": { "15": "USB-C", "17": "HDMI-2" } }
   custom_input_names: Record<string, Record<string, string>>;
+  // Custom display names: displayId -> label
+  // e.g. { "BNQ_0x7950": "BenQ EW3270U" }
+  custom_display_names: Record<string, string>;
 }

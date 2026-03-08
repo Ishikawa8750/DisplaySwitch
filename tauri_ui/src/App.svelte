@@ -70,6 +70,22 @@
     await saveConfig(appConfig);
   }
 
+  /** Handle display rename from MonitorCard */
+  async function handleDisplayNameChange(display: DisplayInfo, newName: string | null) {
+    const id = displayId(display);
+    if (!id || id === "_") return;
+
+    const custom_display_names = { ...(appConfig.custom_display_names ?? {}) };
+    if (newName === null) {
+      delete custom_display_names[id];
+    } else {
+      custom_display_names[id] = newName;
+    }
+
+    appConfig = { ...appConfig, custom_display_names };
+    await saveConfig(appConfig);
+  }
+
   /** Check if running inside Tauri WebView */
   function isTauri(): boolean {
     return !!(window as any).__TAURI_INTERNALS__;
@@ -510,10 +526,12 @@
             <MonitorCard
               {display}
               customInputNames={appConfig.custom_input_names[displayId(display)] ?? undefined}
+              customDisplayName={appConfig.custom_display_names?.[displayId(display)] ?? null}
               onchange={(updates) => {
                 displays[i] = { ...displays[i], ...updates };
               }}
               onInputNameChange={(code, name) => handleInputNameChange(display, code, name)}
+              onDisplayNameChange={(name) => handleDisplayNameChange(display, name)}
             />
           {/each}
         </div>

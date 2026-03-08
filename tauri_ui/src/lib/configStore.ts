@@ -43,6 +43,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   als_enabled: false,
   als_interval_ms: 10000,
   custom_input_names: {},
+  custom_display_names: {},
 };
 
 let storeInstance: any = null;
@@ -73,6 +74,7 @@ export async function loadConfig(): Promise<AppConfig> {
       als_enabled: saved.als_enabled ?? DEFAULT_CONFIG.als_enabled,
       als_interval_ms: saved.als_interval_ms ?? DEFAULT_CONFIG.als_interval_ms,
       custom_input_names: saved.custom_input_names ?? DEFAULT_CONFIG.custom_input_names,
+      custom_display_names: saved.custom_display_names ?? DEFAULT_CONFIG.custom_display_names,
     };
   } catch (e) {
     console.error("Failed to load config:", e);

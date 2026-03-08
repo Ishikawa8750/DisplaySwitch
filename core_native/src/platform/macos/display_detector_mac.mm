@@ -274,9 +274,25 @@ static std::string get_display_name(CGDirectDisplayID displayID) {
                     if (prodAttrs && CFGetTypeID(prodAttrs) == CFDictionaryGetTypeID()) {
                         CFNumberRef mfrRef = (CFNumberRef)CFDictionaryGetValue(
                             prodAttrs, CFSTR("LegacyManufacturerID"));
-                        int mfr = 0;
+                        CFNumberRef prodRef = (CFNumberRef)CFDictionaryGetValue(
+                            prodAttrs, CFSTR("ProductID"));
+                        int mfr = 0, prod = 0;
                         if (mfrRef) CFNumberGetValue(mfrRef, kCFNumberIntType, &mfr);
-                        if ((uint32_t)mfr == targetVendor) {
+                        if (prodRef) CFNumberGetValue(prodRef, kCFNumberIntType, &prod);
+                        if ((uint32_t)mfr == targetVendor && (uint32_t)prod == targetModel) {
+                            // Try ProductName directly in ProductAttributes
+                            CFTypeRef pnAttr = CFDictionaryGetValue(
+                                prodAttrs, CFSTR("ProductName"));
+                            if (pnAttr && CFGetTypeID(pnAttr) == CFStringGetTypeID()) {
+                                std::string name = cfstring_to_string((CFStringRef)pnAttr);
+                                if (!name.empty()) {
+                                    CFRelease(attrs);
+                                    IOObjectRelease(serv);
+                                    IOObjectRelease(iter);
+                                    return name;
+                                }
+                            }
+
                             // Search subtree for ProductName
                             CFTypeRef pn = IORegistryEntrySearchCFProperty(
                                 serv, kIOServicePlane, CFSTR("ProductName"),
@@ -997,6 +1013,12 @@ public:
                 } catch (const std::exception& e) {
                     std::cerr << "[DisplaySwitch] EDID parse error for display " << did << ": " << e.what() << std::endl;
                 }
+            }
+
+            // ── Final name fallback ─────────────────────────────────
+            // If still "Unknown Display", use manufacturer + product code
+            if (d.name == "Unknown Display" && !d.manufacturer_id.empty()) {
+                d.name = d.manufacturer_id + " " + d.product_code;
             }
 
             // ── Enrich connection type from EDID ────────────────────────

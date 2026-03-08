@@ -5,13 +5,17 @@
   let {
     display,
     customInputNames,
+    customDisplayName,
     onchange,
     onInputNameChange,
+    onDisplayNameChange,
   }: {
     display: DisplayInfo;
     customInputNames?: Record<string, string>;
+    customDisplayName?: string | null;
     onchange?: (updates: Partial<DisplayInfo>) => void;
     onInputNameChange?: (vcpCode: number, newName: string | null) => void;
+    onDisplayNameChange?: (newName: string | null) => void;
   } = $props();
 
   let brightnessOverride = $state<number | null>(null);
@@ -19,9 +23,13 @@
   let statusMsg = $state("");
   let editingInputCode = $state<number | null>(null);
   let editingInputValue = $state("");
+  let editingDisplayName = $state(false);
+  let editingDisplayNameValue = $state("");
 
   // Context menu for input rename
   let contextMenu = $state<{ x: number; y: number; code: number } | null>(null);
+  // Context menu for display header rename
+  let headerContextMenu = $state<{ x: number; y: number } | null>(null);
 
   // Auto-clear brightnessOverride after user stops dragging (sync with backend)
   let overrideClearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,6 +163,40 @@
   // Close context menu on outside click
   function handleWindowClick() {
     if (contextMenu) contextMenu = null;
+    if (headerContextMenu) headerContextMenu = null;
+  }
+
+  // Display rename
+  function openHeaderContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    headerContextMenu = { x: e.clientX, y: e.clientY };
+  }
+
+  function startDisplayRename() {
+    editingDisplayName = true;
+    editingDisplayNameValue = customDisplayName || display.name || "";
+    headerContextMenu = null;
+  }
+
+  function commitDisplayRename() {
+    const trimmed = editingDisplayNameValue.trim();
+    if (!trimmed || trimmed === display.name) {
+      onDisplayNameChange?.(null);
+    } else {
+      onDisplayNameChange?.(trimmed);
+    }
+    editingDisplayName = false;
+  }
+
+  function resetDisplayName() {
+    onDisplayNameChange?.(null);
+    headerContextMenu = null;
+  }
+
+  /** Get the display name to show, considering custom names */
+  function getDisplayName(): string {
+    return customDisplayName || display.name;
   }
 </script>
 
@@ -184,7 +226,22 @@
         {#if !display.is_internal && diagonalInches()}
           <span class="size-badge">{diagonalInches()}</span>
         {/if}
-        {display.name}
+        {#if editingDisplayName}
+          <span class="display-name-edit">
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              type="text"
+              class="display-name-field"
+              bind:value={editingDisplayNameValue}
+              onkeydown={(e) => { if (e.key === 'Enter') commitDisplayRename(); if (e.key === 'Escape') editingDisplayName = false; }}
+              autofocus
+            />
+            <button class="edit-action-btn" onclick={commitDisplayRename} title={t("input.save")}>✓</button>
+          </span>
+        {:else}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <span class="display-name-text" oncontextmenu={openHeaderContextMenu}>{getDisplayName()}</span>
+        {/if}
       </h2>
       <span class="subtitle">
         {display.gpu?.formatted_name ?? display.gpu?.name ?? ""}
@@ -301,7 +358,7 @@
     </div>
   {/if}
 
-  <!-- Context Menu -->
+  <!-- Context Menu (Input) -->
   {#if contextMenu}
     <div class="ctx-menu" style="left:{contextMenu.x}px;top:{contextMenu.y}px"
       onclick={(e) => e.stopPropagation()}>
@@ -317,6 +374,21 @@
         <div class="ctx-sep"></div>
         <button class="ctx-item danger" onclick={resetAllInputNames}>
           ↺ {t("input.reset_all")}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Context Menu (Display Name) -->
+  {#if headerContextMenu}
+    <div class="ctx-menu" style="left:{headerContextMenu.x}px;top:{headerContextMenu.y}px"
+      onclick={(e) => e.stopPropagation()}>
+      <button class="ctx-item" onclick={startDisplayRename}>
+        ✏️ Rename Display
+      </button>
+      {#if customDisplayName}
+        <button class="ctx-item" onclick={resetDisplayName}>
+          ↺ Reset Name
         </button>
       {/if}
     </div>
@@ -389,6 +461,30 @@
     background: rgba(122, 162, 247, 0.15);
     color: #7aa2f7;
     flex-shrink: 0;
+  }
+  .display-name-text {
+    cursor: default;
+  }
+  .display-name-edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .display-name-field {
+    width: 140px;
+    padding: 1px 6px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid rgba(122, 162, 247, 0.5);
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.2);
+    color: #e1e4f0;
+    outline: none;
+  }
+  .display-name-field:focus {
+    border-color: rgba(122, 162, 247, 0.8);
+    box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.15);
   }
   .subtitle { font-size: 11px; color: rgba(169, 177, 214, 0.6); }
   .sep { margin: 0 2px; }

@@ -14,7 +14,6 @@ use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{
     image::Image,
@@ -737,6 +736,21 @@ fn window_close(window: tauri::Window) -> Result<(), String> {
     window.hide().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    Ok(())
+}
+
 // ─── Hot-plug detection (Windows WM_DISPLAYCHANGE) ──────────────────────
 
 #[cfg(target_os = "windows")]
@@ -1027,13 +1041,13 @@ fn main() {
             window_minimize,
             window_toggle_maximize,
             window_close,
+            exit_app,
+            show_main_window,
         ])
         .setup(|app| {
             // ── macOS: native decorations + overlay title bar + app menu ─
             #[cfg(target_os = "macos")]
             {
-                use tauri::WebviewWindowBuilder;
-
                 // Re-enable decorations on macOS (disabled in tauri.conf.json for Windows)
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_decorations(true);
@@ -1092,10 +1106,6 @@ fn main() {
             }
 
             // ── System tray ─────────────────────────────────────────
-            let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-
             let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("Failed to load tray icon");
 
@@ -1109,7 +1119,7 @@ fn main() {
                     tauri::WebviewUrl::App("index.html".into()),
                 )
                 .title("DisplaySwitch")
-                .inner_size(320.0, 360.0)
+                .inner_size(320.0, 420.0)
                 .decorations(false)
                 .resizable(false)
                 .skip_taskbar(true)
@@ -1118,23 +1128,38 @@ fn main() {
                 .build()?;
             }
 
-            let _tray = TrayIconBuilder::new()
-                .icon(icon)
-                .menu(&menu)
-                .tooltip("DisplaySwitch")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.unminimize();
-                            let _ = w.set_focus();
+            // On macOS, no native menu so left-click fires on_tray_icon_event for the popup.
+            // On other platforms, attach a native right-click menu.
+            #[cfg(not(target_os = "macos"))]
+            let tray_builder = {
+                let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+                TrayIconBuilder::new()
+                    .icon(icon)
+                    .menu(&menu)
+                    .tooltip("DisplaySwitch")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
                         }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+            };
+
+            #[cfg(target_os = "macos")]
+            let tray_builder = TrayIconBuilder::new()
+                .icon(icon)
+                .tooltip("DisplaySwitch");
+
+            let _tray = tray_builder
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
@@ -1148,13 +1173,11 @@ fn main() {
                         #[cfg(target_os = "macos")]
                         {
                             use tauri::PhysicalPosition;
-                            // Toggle the tray popup on macOS
                             if let Some(popup) = app.get_webview_window("tray_popup") {
                                 let visible = popup.is_visible().unwrap_or(false);
                                 if visible {
                                     let _ = popup.hide();
                                 } else {
-                                    // Position below the click, centered horizontally
                                     let popup_width = 320.0_f64;
                                     let x = (position.x - popup_width / 2.0).max(0.0);
                                     let y = position.y + 4.0;
