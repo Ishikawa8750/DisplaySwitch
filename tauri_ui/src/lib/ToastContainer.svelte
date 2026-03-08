@@ -46,14 +46,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px;
-    border-radius: 3px;
+    padding: 8px 14px;
+    border-radius: 10px;
     font-size: 12px;
-    font-family: "Segoe UI", -apple-system, sans-serif;
-    color: #c0caf5;
-    background: #24283b;
-    border: 1px solid #232433;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    color: #e1e4f0;
+    background: rgba(30, 30, 40, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     animation: toast-in 0.15s ease-out;
     pointer-events: auto;
   }
@@ -69,9 +71,9 @@
   .toast-error   { border-left: 3px solid #f7768e; color: #f7768e; }
 
   :global(html.light) .toast {
-    background: #e9e9ec;
-    border-color: #c4c5ca;
-    color: #343b58;
+    background: rgba(240, 240, 243, 0.92);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #1a1b2e;
   }
   :global(html.light) .toast-info    { border-left-color: #34548a; }
   :global(html.light) .toast-success { border-left-color: #485e30; }

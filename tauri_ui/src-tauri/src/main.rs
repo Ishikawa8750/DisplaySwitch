@@ -1109,7 +1109,7 @@ fn main() {
                     tauri::WebviewUrl::App("index.html".into()),
                 )
                 .title("DisplaySwitch")
-                .inner_size(520.0, 220.0)
+                .inner_size(320.0, 360.0)
                 .decorations(false)
                 .resizable(false)
                 .skip_taskbar(true)
@@ -1155,7 +1155,7 @@ fn main() {
                                     let _ = popup.hide();
                                 } else {
                                     // Position below the click, centered horizontally
-                                    let popup_width = 520.0_f64;
+                                    let popup_width = 320.0_f64;
                                     let x = (position.x - popup_width / 2.0).max(0.0);
                                     let y = position.y + 4.0;
                                     let _ = popup.set_position(PhysicalPosition::new(x as i32, y as i32));

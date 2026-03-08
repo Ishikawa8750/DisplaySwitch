@@ -113,16 +113,38 @@ void EDIDParser::parse_base_block(const uint8_t* b, EDIDInfo& info) {
     info.chromaticity = {};
 
     // Detailed timing descriptors (bytes 54-125, four 18-byte blocks)
+    bool has_preferred = false;
     for (int i = 0; i < 4; ++i) {
         const uint8_t* dtd = b + 54 + i * 18;
         uint16_t pixel_clk = read_le16(dtd);
-        if (pixel_clk == 0) continue;  // Not a timing descriptor
-        if (i == 0) {
-            parse_detailed_timing(dtd, info.preferred_mode);
+        if (pixel_clk != 0) {
+            // Detailed timing descriptor
+            if (!has_preferred) {
+                parse_detailed_timing(dtd, info.preferred_mode);
+                has_preferred = true;
+            }
+            VideoMode mode{};
+            parse_detailed_timing(dtd, mode);
+            info.supported_modes.push_back(mode);
+        } else if (dtd[2] == 0 && dtd[4] == 0) {
+            // Display descriptor: tag is at byte 3
+            uint8_t tag = dtd[3];
+            if (tag == 0xFC) {
+                // Monitor name descriptor (bytes 5-17, up to 13 chars, padded with 0x0A/spaces)
+                char name[14]{};
+                int len = 0;
+                for (int j = 5; j < 18 && dtd[j] != 0x0A && dtd[j] != 0x00; ++j) {
+                    name[len++] = static_cast<char>(dtd[j]);
+                }
+                // Trim trailing spaces
+                while (len > 0 && name[len - 1] == ' ') --len;
+                name[len] = '\0';
+                if (len > 0) {
+                    std::strncpy(info.product_code, name, 13);
+                    info.product_code[13] = '\0';
+                }
+            }
         }
-        VideoMode mode{};
-        parse_detailed_timing(dtd, mode);
-        info.supported_modes.push_back(mode);
     }
 }
 

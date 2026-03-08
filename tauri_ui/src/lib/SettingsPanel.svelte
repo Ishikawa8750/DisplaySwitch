@@ -495,6 +495,8 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -502,60 +504,69 @@
   }
 
   .panel {
-    background: #1a1b26;
-    border: 1px solid #232433;
-    border-radius: 4px;
+    background: rgba(22, 22, 30, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
     width: 560px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
   }
 
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
-    border-bottom: 1px solid #232433;
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   h2 {
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    color: #c0caf5;
+    color: #e1e4f0;
   }
 
   .close-btn {
     background: none;
     border: none;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.4);
     font-size: 16px;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 4px 6px;
     line-height: 1;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
   }
-  .close-btn:hover { color: #c0caf5; }
+  .close-btn:hover {
+    color: #e1e4f0;
+    background: rgba(255, 255, 255, 0.06);
+  }
 
   .tabs {
     display: flex;
-    border-bottom: 1px solid #232433;
-    padding: 0 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 16px;
+    gap: 2px;
   }
   .tabs button {
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    color: #565a89;
-    padding: 8px 14px;
+    color: rgba(169, 177, 214, 0.45);
+    padding: 10px 14px;
     cursor: pointer;
     font-size: 12px;
+    font-weight: 500;
     font-family: inherit;
     transition: all 0.12s;
   }
-  .tabs button:hover { color: #a9b1d6; }
+  .tabs button:hover { color: rgba(169, 177, 214, 0.8); }
   .tabs button.active {
     color: #7aa2f7;
     border-bottom-color: #7aa2f7;
@@ -564,7 +575,7 @@
   .content {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 16px;
+    padding: 16px 20px;
   }
 
   section { display: flex; flex-direction: column; gap: 4px; }
@@ -573,37 +584,38 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid #232433;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   }
-  .setting-row strong { color: #a9b1d6; font-size: 12px; font-weight: 500; }
+  .setting-row strong { color: rgba(169, 177, 214, 0.85); font-size: 12px; font-weight: 500; }
 
-  .hint { color: #3b3f5c; font-size: 11px; margin: 2px 0 0; }
+  .hint { color: rgba(169, 177, 214, 0.3); font-size: 11px; margin: 2px 0 0; }
 
   .toggle {
-    padding: 3px 12px;
-    border: 1px solid #24283b;
-    border-radius: 3px;
-    background: #24283b;
-    color: #565a89;
+    padding: 4px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(169, 177, 214, 0.5);
     cursor: pointer;
     font-size: 11px;
+    font-weight: 500;
     font-family: inherit;
     min-width: 48px;
     transition: all 0.15s;
   }
   .toggle.on {
-    background: #34548a;
-    border-color: #7aa2f7;
-    color: #c0caf5;
+    background: rgba(122, 162, 247, 0.18);
+    border-color: rgba(122, 162, 247, 0.35);
+    color: #7aa2f7;
   }
 
   select {
-    background: #24283b;
-    border: 1px solid #232433;
-    border-radius: 3px;
-    color: #a9b1d6;
-    padding: 3px 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(169, 177, 214, 0.85);
+    padding: 4px 8px;
     font-size: 12px;
     font-family: inherit;
   }
@@ -613,8 +625,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 0;
-    border-bottom: 1px solid #232433;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   }
   .hk-shortcut { flex: 0 0 130px; }
   .hk-action { flex: 1; }
@@ -626,29 +638,30 @@
   }
   .hk-value input {
     width: 44px;
-    background: #24283b;
-    border: 1px solid #232433;
-    border-radius: 3px;
-    color: #a9b1d6;
-    padding: 2px 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: rgba(169, 177, 214, 0.85);
+    padding: 3px 6px;
     font-size: 11px;
     font-family: inherit;
   }
-  .unit { color: #3b3f5c; font-size: 10px; }
+  .unit { color: rgba(169, 177, 214, 0.3); font-size: 10px; }
 
   .shortcut-btn {
     width: 100%;
-    padding: 3px 8px;
-    border: 1px solid #24283b;
-    border-radius: 3px;
-    background: #16161e;
-    color: #a9b1d6;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(169, 177, 214, 0.85);
     cursor: pointer;
-    font-family: "Cascadia Code", "Consolas", monospace;
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
     font-size: 11px;
     text-align: center;
+    transition: border-color 0.15s;
   }
-  .shortcut-btn:hover { border-color: #7aa2f7; }
+  .shortcut-btn:hover { border-color: rgba(122, 162, 247, 0.4); }
   .shortcut-btn.recording {
     border-color: #e0af68;
     color: #e0af68;
@@ -663,33 +676,36 @@
   .remove-btn {
     background: none;
     border: none;
-    color: #3b3f5c;
+    color: rgba(169, 177, 214, 0.25);
     cursor: pointer;
     font-size: 14px;
-    padding: 2px 4px;
+    padding: 4px 6px;
     font-family: inherit;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
   }
-  .remove-btn:hover { color: #f7768e; }
+  .remove-btn:hover { color: #f7768e; background: rgba(247, 118, 142, 0.08); }
 
   .add-btn {
-    margin-top: 6px;
-    padding: 4px 12px;
-    border: 1px dashed #232433;
-    border-radius: 3px;
+    margin-top: 8px;
+    padding: 5px 14px;
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
     background: transparent;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.4);
     cursor: pointer;
     font-size: 11px;
     font-family: inherit;
+    transition: all 0.15s;
   }
-  .add-btn:hover { border-color: #7aa2f7; color: #7aa2f7; }
+  .add-btn:hover { border-color: rgba(122, 162, 247, 0.4); color: #7aa2f7; }
 
   /* ── Presets ── */
   .preset-card {
-    background: #16161e;
-    border: 1px solid #232433;
-    border-radius: 3px;
-    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 12px;
   }
   .preset-header {
     display: flex;
@@ -699,8 +715,8 @@
   .preset-name {
     background: transparent;
     border: none;
-    border-bottom: 1px solid #232433;
-    color: #c0caf5;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e1e4f0;
     font-size: 13px;
     font-weight: 600;
     font-family: inherit;
@@ -724,7 +740,7 @@
   }
   .act-display {
     flex: 0 0 110px;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.45);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -733,16 +749,16 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.45);
     font-size: 11px;
   }
   .action-row input {
     width: 44px;
-    background: #24283b;
-    border: 1px solid #232433;
-    border-radius: 3px;
-    color: #a9b1d6;
-    padding: 2px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: rgba(169, 177, 214, 0.85);
+    padding: 3px;
     font-size: 11px;
     font-family: inherit;
   }
@@ -754,7 +770,7 @@
     margin-top: 4px;
     background: none;
     border: none;
-    color: #3b3f5c;
+    color: rgba(169, 177, 214, 0.3);
     cursor: pointer;
     font-size: 11px;
     font-family: inherit;
@@ -763,7 +779,7 @@
   .collapse-btn:hover { color: #7aa2f7; }
 
   .status {
-    padding: 6px 16px;
+    padding: 8px 20px;
     font-size: 11px;
     color: #e0af68;
     background: rgba(224, 175, 104, 0.06);
@@ -773,99 +789,102 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding: 8px 16px;
-    border-top: 1px solid #232433;
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
   .cancel-btn {
-    padding: 4px 14px;
-    border: 1px solid #232433;
-    border-radius: 3px;
-    background: #24283b;
-    color: #565a89;
+    padding: 6px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(169, 177, 214, 0.6);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
+    transition: all 0.15s;
   }
-  .cancel-btn:hover { background: #2a2e47; }
+  .cancel-btn:hover { background: rgba(255, 255, 255, 0.08); color: rgba(169, 177, 214, 0.8); }
 
   .save-btn {
-    padding: 4px 14px;
-    border: 1px solid #34548a;
-    border-radius: 3px;
-    background: #34548a;
-    color: #c0caf5;
+    padding: 6px 16px;
+    border: 1px solid rgba(122, 162, 247, 0.35);
+    border-radius: 8px;
+    background: rgba(122, 162, 247, 0.18);
+    color: #7aa2f7;
     cursor: pointer;
     font-size: 12px;
+    font-weight: 500;
     font-family: inherit;
+    transition: all 0.15s;
   }
-  .save-btn:hover { background: #3d5fa0; }
+  .save-btn:hover { background: rgba(122, 162, 247, 0.25); }
 
   /* ── Light theme ── */
   :global(html.light) .panel {
-    background: #d5d6db;
-    border-color: #c4c5ca;
+    background: rgba(220, 220, 225, 0.96);
+    border-color: rgba(0, 0, 0, 0.08);
   }
   :global(html.light) header {
-    border-bottom-color: #c4c5ca;
+    border-bottom-color: rgba(0, 0, 0, 0.06);
   }
-  :global(html.light) h2 { color: #343b58; }
-  :global(html.light) .close-btn { color: #9ca0b9; }
-  :global(html.light) .close-btn:hover { color: #343b58; }
-  :global(html.light) .tabs { border-bottom-color: #c4c5ca; }
-  :global(html.light) .tabs button { color: #8990b3; }
-  :global(html.light) .tabs button:hover { color: #343b58; }
+  :global(html.light) h2 { color: #1a1b2e; }
+  :global(html.light) .close-btn { color: rgba(52, 59, 88, 0.4); }
+  :global(html.light) .close-btn:hover { color: #1a1b2e; background: rgba(0, 0, 0, 0.05); }
+  :global(html.light) .tabs { border-bottom-color: rgba(0, 0, 0, 0.06); }
+  :global(html.light) .tabs button { color: rgba(52, 59, 88, 0.4); }
+  :global(html.light) .tabs button:hover { color: rgba(52, 59, 88, 0.8); }
   :global(html.light) .tabs button.active {
     color: #34548a;
     border-bottom-color: #34548a;
   }
-  :global(html.light) .setting-row { border-bottom-color: #c4c5ca; }
-  :global(html.light) .setting-row strong { color: #343b58; }
-  :global(html.light) .hint { color: #9ca0b9; }
+  :global(html.light) .setting-row { border-bottom-color: rgba(0, 0, 0, 0.04); }
+  :global(html.light) .setting-row strong { color: rgba(52, 59, 88, 0.85); }
+  :global(html.light) .hint { color: rgba(52, 59, 88, 0.3); }
   :global(html.light) .toggle {
-    background: #c4c5ca;
-    border-color: #b8b9be;
-    color: #8990b3;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(52, 59, 88, 0.45);
   }
   :global(html.light) .toggle.on {
-    background: #34548a;
-    border-color: #2e4a7a;
-    color: #d5d6db;
+    background: rgba(52, 84, 138, 0.12);
+    border-color: rgba(52, 84, 138, 0.3);
+    color: #34548a;
   }
   :global(html.light) select {
-    background: #c4c5ca;
-    border-color: #b8b9be;
-    color: #343b58;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(52, 59, 88, 0.85);
   }
   :global(html.light) .shortcut-btn {
-    background: #c4c5ca;
-    border-color: #b8b9be;
-    color: #343b58;
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(52, 59, 88, 0.85);
   }
   :global(html.light) .hk-value input {
-    background: #c4c5ca;
-    border-color: #b8b9be;
-    color: #343b58;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(52, 59, 88, 0.85);
   }
-  :global(html.light) .hotkey-row { border-bottom-color: #c4c5ca; }
+  :global(html.light) .hotkey-row { border-bottom-color: rgba(0, 0, 0, 0.04); }
   :global(html.light) .preset-card {
-    background: #c4c5ca;
-    border-color: #b8b9be;
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.06);
   }
-  :global(html.light) .preset-name { color: #343b58; border-bottom-color: #b8b9be; }
+  :global(html.light) .preset-name { color: #1a1b2e; border-bottom-color: rgba(0, 0, 0, 0.06); }
   :global(html.light) .preset-name:focus { border-bottom-color: #34548a; }
   :global(html.light) .action-row input {
-    background: #d5d6db;
-    border-color: #b8b9be;
-    color: #343b58;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(52, 59, 88, 0.85);
   }
-  :global(html.light) .add-btn { border-color: #b8b9be; color: #8990b3; }
-  :global(html.light) .add-btn:hover { border-color: #34548a; color: #34548a; }
+  :global(html.light) .add-btn { border-color: rgba(0, 0, 0, 0.1); color: rgba(52, 59, 88, 0.4); }
+  :global(html.light) .add-btn:hover { border-color: rgba(52, 84, 138, 0.4); color: #34548a; }
   :global(html.light) .cancel-btn {
-    background: #c4c5ca;
-    border-color: #b8b9be;
-    color: #8990b3;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(52, 59, 88, 0.6);
   }
-  :global(html.light) .cancel-btn:hover { background: #b8b9be; }
-  :global(html.light) footer { border-top-color: #c4c5ca; }
+  :global(html.light) .cancel-btn:hover { background: rgba(0, 0, 0, 0.07); }
+  :global(html.light) footer { border-top-color: rgba(0, 0, 0, 0.06); }
   :global(html.light) .status { color: #8f5e15; background: rgba(143, 94, 21, 0.06); }
 </style>

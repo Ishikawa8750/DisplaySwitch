@@ -578,20 +578,20 @@
 />
 
 <style>
-  /* ═══ Tokyo Night / VS Code Global Tokens ═══ */
+  /* ═══ Global Design Tokens ═══ */
   :global(body) {
     margin: 0;
-    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     font-size: 13px;
     line-height: 1.4;
-    background: #1a1b26;
+    background: #13131a;
     color: #a9b1d6;
     transition: background 0.2s, color 0.2s;
     overflow: hidden;
   }
 
   :global(html.light body) {
-    background: #d5d6db;
+    background: #f0f0f3;
     color: #343b58;
   }
 
@@ -636,22 +636,22 @@
     height: calc(100vh - 31px); /* 30px titlebar + 1px border */
   }
 
-  /* ═══ Activity Bar (left, VS Code style) ═══ */
+  /* ═══ Activity Bar (left sidebar) ═══ */
   .activity-bar {
-    width: 48px;
-    min-width: 48px;
-    background: #16161e;
-    border-right: 1px solid #101014;
+    width: 52px;
+    min-width: 52px;
+    background: rgba(255, 255, 255, 0.03);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 4px 0;
+    padding: 8px 0;
     z-index: 100;
   }
 
   :global(html.light) .activity-bar {
-    background: #c4c5ca;
-    border-right-color: #b8b9be;
+    background: rgba(0, 0, 0, 0.03);
+    border-right-color: rgba(0, 0, 0, 0.06);
   }
 
   .activity-top {
@@ -675,44 +675,49 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 0;
+    border-radius: 10px;
     background: transparent;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.4);
     cursor: pointer;
     position: relative;
-    transition: color 0.15s;
+    transition: color 0.15s, background 0.15s;
     padding: 0;
     font-size: 0;
+    margin: 1px 0;
   }
 
   .activity-btn:hover {
-    color: #a9b1d6;
+    color: rgba(169, 177, 214, 0.8);
+    background: rgba(255, 255, 255, 0.05);
   }
 
   :global(html.light) .activity-btn {
-    color: #8990b3;
+    color: rgba(52, 59, 88, 0.4);
   }
   :global(html.light) .activity-btn:hover {
-    color: #343b58;
+    color: rgba(52, 59, 88, 0.8);
+    background: rgba(0, 0, 0, 0.05);
   }
 
   .activity-btn.active {
-    color: #c0caf5;
+    color: #e1e4f0;
+    background: rgba(122, 162, 247, 0.12);
   }
 
   .activity-btn.active::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 8px;
-    bottom: 8px;
-    width: 2px;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
     background: #7aa2f7;
-    border-radius: 0 1px 1px 0;
+    border-radius: 0 2px 2px 0;
   }
 
   :global(html.light) .activity-btn.active {
-    color: #343b58;
+    color: #1a1b2e;
+    background: rgba(52, 84, 138, 0.1);
   }
 
   :global(html.light) .activity-btn.active::before {
@@ -742,32 +747,32 @@
   }
 
   .panel-header {
-    height: 35px;
-    min-height: 35px;
+    height: 40px;
+    min-height: 40px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
-    background: #1a1b26;
-    border-bottom: 1px solid #101014;
+    padding: 0 20px;
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     user-select: none;
   }
 
   :global(html.light) .panel-header {
-    background: #d5d6db;
-    border-bottom-color: #c4c5ca;
+    background: transparent;
+    border-bottom-color: rgba(0, 0, 0, 0.06);
   }
 
   .panel-title {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #565a89;
+    letter-spacing: 0.6px;
+    color: rgba(169, 177, 214, 0.4);
   }
 
   :global(html.light) .panel-title {
-    color: #8990b3;
+    color: rgba(52, 59, 88, 0.4);
   }
 
   .header-presets {
@@ -776,56 +781,58 @@
   }
 
   .preset-chip {
-    padding: 2px 10px;
-    border: 1px solid #24283b;
-    border-radius: 3px;
-    background: #24283b;
+    padding: 3px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
     color: #e0af68;
     cursor: pointer;
     font-size: 11px;
+    font-weight: 500;
     transition: all 0.15s;
+    font-family: inherit;
   }
   .preset-chip:hover {
-    background: #2a2e47;
-    border-color: #e0af68;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(224, 175, 104, 0.3);
   }
 
   :global(html.light) .preset-chip {
-    background: #c4c5ca;
-    border-color: #b8b9be;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
     color: #8f5e15;
   }
   :global(html.light) .preset-chip:hover {
-    background: #b8b9be;
-    border-color: #8f5e15;
+    background: rgba(0, 0, 0, 0.07);
+    border-color: rgba(143, 94, 21, 0.3);
   }
 
   /* ═══ Content scroll area ═══ */
   .content-scroll {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 16px;
+    padding: 16px 20px;
     padding-bottom: 40px; /* statusbar clearance */
   }
 
   .cards-list {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 10px;
   }
 
   .error-banner {
-    padding: 8px 12px;
-    margin-bottom: 8px;
-    background: rgba(247, 118, 142, 0.12);
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    background: rgba(247, 118, 142, 0.08);
     border-left: 3px solid #f7768e;
     color: #f7768e;
     font-size: 12px;
-    border-radius: 0 3px 3px 0;
+    border-radius: 0 8px 8px 0;
   }
 
   :global(html.light) .error-banner {
-    background: rgba(143, 94, 21, 0.08);
+    background: rgba(140, 67, 81, 0.06);
     border-left-color: #8c4351;
     color: #8c4351;
   }
@@ -836,7 +843,7 @@
     align-items: center;
     justify-content: center;
     padding: 4rem 2rem;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.35);
     gap: 1rem;
   }
 

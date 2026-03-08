@@ -85,7 +85,7 @@
 
   <!-- Version -->
   <div class="status-item version">
-    <span class="status-text">v2.11.0</span>
+    <span class="status-text">v2.17.0</span>
   </div>
 </footer>
 
@@ -93,20 +93,20 @@
   .status-bar {
     position: fixed;
     bottom: 0;
-    left: 48px; /* clear activity bar */
+    left: 52px; /* clear activity bar */
     right: 0;
-    height: 22px;
+    height: 24px;
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 0 10px;
-    background: #16161e;
-    border-top: 1px solid #101014;
+    padding: 0 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     font-size: 11px;
-    color: #565a89;
+    color: rgba(169, 177, 214, 0.4);
     z-index: 500;
     user-select: none;
-    font-family: "Segoe UI", -apple-system, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     animation: statusbar-slide-up 0.35s ease-out;
   }
 
@@ -116,9 +116,9 @@
   }
 
   :global(html.light) .status-bar {
-    background: #c4c5ca;
-    border-top-color: #b8b9be;
-    color: #8990b3;
+    background: rgba(0, 0, 0, 0.02);
+    border-top-color: rgba(0, 0, 0, 0.06);
+    color: rgba(52, 59, 88, 0.4);
   }
 
   .status-item {
@@ -126,19 +126,19 @@
     align-items: center;
     gap: 4px;
     white-space: nowrap;
-    padding: 0 4px;
-    border-radius: 3px;
-    transition: background 0.18s ease, color 0.18s ease;
+    padding: 1px 6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
   }
 
   .status-item:hover {
     background: rgba(255, 255, 255, 0.06);
-    color: #a9b1d6;
+    color: rgba(169, 177, 214, 0.7);
   }
 
   :global(html.light) .status-item:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #4c5272;
+    background: rgba(0, 0, 0, 0.05);
+    color: rgba(52, 59, 88, 0.7);
   }
 
   .status-text {
@@ -146,12 +146,12 @@
   }
 
   .status-detail {
-    color: #3b3f5c;
+    color: rgba(169, 177, 214, 0.25);
     font-size: 10px;
   }
 
   :global(html.light) .status-detail {
-    color: #9ca0b9;
+    color: rgba(52, 59, 88, 0.3);
   }
 
   .spacer {

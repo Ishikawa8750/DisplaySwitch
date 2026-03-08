@@ -977,14 +977,21 @@ public:
                     }
 
                     // Update name from EDID if we got a better one
-                    std::string edid_name;
-                    // The EDID product_code field may contain the monitor name
                     if (d.name == "Unknown Display" || d.name == "Built-in Display") {
-                        if (d.edid.manufacturer[0] != '\0') {
-                            edid_name = std::string(d.edid.manufacturer) + " " + d.edid.product_code;
-                            if (edid_name.length() > 4) {
-                                d.name = edid_name;
+                        // Check if product_code contains a readable monitor name (from 0xFC descriptor)
+                        bool has_readable_name = false;
+                        if (d.edid.product_code[0] != '\0') {
+                            // If product_code does NOT start with "0x", it's a name from 0xFC
+                            std::string pc = d.edid.product_code;
+                            if (pc.substr(0, 2) != "0x" && pc.length() > 1) {
+                                has_readable_name = true;
                             }
+                        }
+
+                        if (has_readable_name && d.edid.manufacturer[0] != '\0') {
+                            d.name = std::string(d.edid.manufacturer) + " " + d.edid.product_code;
+                        } else if (d.edid.manufacturer[0] != '\0') {
+                            d.name = std::string(d.edid.manufacturer) + " " + d.edid.product_code;
                         }
                     }
                 } catch (const std::exception& e) {
@@ -1095,6 +1102,21 @@ public:
         if (display.is_internal) return false;
 
         CGDirectDisplayID did = display_ids_[idx];
+
+        // Try writing VCP 0x60 with retries (some monitors need multiple attempts)
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            if (ddc_write(did, 0x60, static_cast<uint16_t>(input_code))) {
+                // Wait for monitor to process the command
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                // Verify by reading back
+                int current = ddc_read(did, 0x60);
+                if (current == input_code) return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        // Final attempt without verification
         return ddc_write(did, 0x60, static_cast<uint16_t>(input_code));
     }
 

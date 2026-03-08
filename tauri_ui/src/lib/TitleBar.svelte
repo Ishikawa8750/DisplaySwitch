@@ -75,17 +75,17 @@
     min-height: 30px;
     display: flex;
     align-items: center;
-    background: #16161e;
-    border-bottom: 1px solid #101014;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     user-select: none;
     -webkit-app-region: drag;
     z-index: 1000;
-    font-family: "Segoe UI", -apple-system, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   }
 
   :global(html.light) .titlebar {
-    background: #c4c5ca;
-    border-bottom-color: #b8b9be;
+    background: rgba(0, 0, 0, 0.02);
+    border-bottom-color: rgba(0, 0, 0, 0.06);
   }
 
   .titlebar-left {
@@ -103,12 +103,12 @@
 
   .titlebar-title {
     font-size: 12px;
-    color: #787c99;
+    color: rgba(169, 177, 214, 0.4);
     font-weight: 400;
   }
 
   :global(html.light) .titlebar-title {
-    color: #6e7191;
+    color: rgba(52, 59, 88, 0.4);
   }
 
   .titlebar-spacer { flex: 1; }
@@ -124,27 +124,27 @@
     height: 100%;
     border: none;
     background: transparent;
-    color: #787c99;
+    color: rgba(169, 177, 214, 0.35);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    transition: background 0.1s;
+    transition: background 0.1s, color 0.1s;
   }
 
   .win-btn:hover {
     background: rgba(255, 255, 255, 0.06);
-    color: #c0caf5;
+    color: #e1e4f0;
   }
 
   :global(html.light) .win-btn {
-    color: #6e7191;
+    color: rgba(52, 59, 88, 0.35);
   }
 
   :global(html.light) .win-btn:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #343b58;
+    background: rgba(0, 0, 0, 0.05);
+    color: #1a1b2e;
   }
 
   .win-close:hover {

@@ -48,49 +48,51 @@
   .profile-list {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 4px;
   }
 
   .profile-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
+    gap: 10px;
+    padding: 8px 14px;
     border: none;
-    border-radius: 0;
+    border-radius: 10px;
     background: transparent;
-    color: #a9b1d6;
+    color: rgba(169, 177, 214, 0.7);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
-    transition: background 0.12s;
+    transition: background 0.15s, color 0.15s;
     white-space: nowrap;
     text-align: left;
     width: 100%;
   }
 
   .profile-item:hover {
-    background: #24283b;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(169, 177, 214, 0.9);
   }
 
   .profile-item.active {
-    background: #24283b;
-    color: #c0caf5;
-    border-left: 2px solid #7aa2f7;
-    padding-left: 10px;
+    background: rgba(122, 162, 247, 0.1);
+    color: #e1e4f0;
+    border-left: 3px solid #7aa2f7;
+    padding-left: 11px;
   }
 
   :global(html.light) .profile-item {
-    color: #343b58;
+    color: rgba(52, 59, 88, 0.7);
   }
 
   :global(html.light) .profile-item:hover {
-    background: #c4c5ca;
+    background: rgba(0, 0, 0, 0.04);
+    color: rgba(52, 59, 88, 0.9);
   }
 
   :global(html.light) .profile-item.active {
-    background: #c4c5ca;
-    color: #343b58;
+    background: rgba(52, 84, 138, 0.08);
+    color: #1a1b2e;
     border-left-color: #34548a;
   }
 
@@ -111,9 +113,9 @@
 
   .item-badge {
     font-size: 9px;
-    padding: 1px 5px;
-    border-radius: 2px;
-    background: rgba(122, 162, 247, 0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(122, 162, 247, 0.15);
     color: #7aa2f7;
     font-weight: 600;
     text-transform: uppercase;
@@ -121,7 +123,7 @@
   }
 
   :global(html.light) .item-badge {
-    background: rgba(52, 84, 138, 0.12);
+    background: rgba(52, 84, 138, 0.1);
     color: #34548a;
   }
 </style>
