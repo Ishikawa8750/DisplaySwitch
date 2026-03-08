@@ -266,6 +266,40 @@ DS_API int ds_get_input(DsDetector* det, int display_index) {
     return det->detector->get_input(det->cached_displays[display_index]);
 }
 
+DS_API int ds_get_hdr_enabled(DsDetector* det, int display_index) {
+    if (!det) return -1;
+    std::lock_guard<std::mutex> lock(det->mtx);
+    if (display_index < 0 || display_index >= static_cast<int>(det->cached_displays.size()))
+        return -1;
+    return det->detector->get_hdr_enabled(det->cached_displays[display_index]) ? 1 : 0;
+}
+
+DS_API int ds_set_hdr(DsDetector* det, int display_index, int enabled) {
+    if (!det) return -1;
+    std::lock_guard<std::mutex> lock(det->mtx);
+    if (display_index < 0 || display_index >= static_cast<int>(det->cached_displays.size())) {
+        set_error(det, "Display index out of range");
+        return -1;
+    }
+    bool ok = det->detector->set_hdr(det->cached_displays[display_index], enabled != 0);
+    if (!ok) set_error(det, "set_hdr failed (unsupported or CoreDisplay API unavailable)");
+    return ok ? 0 : -1;
+}
+
+DS_API void ds_free_string(const char* str) {
+    std::free(const_cast<char*>(str));
+}
+
+DS_API const char* ds_get_thunderbolt_topology(void) {
+    try {
+        std::string json = displayswitch::get_thunderbolt_topology_json();
+        if (json == "[]") return nullptr;
+        return dup_str(json);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
 DS_API const char* ds_version(void) {
     return "2.0.0";
 }

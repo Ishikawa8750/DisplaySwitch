@@ -7,7 +7,7 @@
   import StatusBar from "./lib/StatusBar.svelte";
   import TopologyView from "./lib/TopologyView.svelte";
   import TitleBar from "./lib/TitleBar.svelte";
-  import type { DisplayInfo, AppConfig, Profile, PresetAction } from "./lib/types";
+  import type { DisplayInfo, AppConfig, Profile, PresetAction, ThunderboltPort } from "./lib/types";
   import { loadConfig, saveConfig, saveActiveProfile, DEFAULT_CONFIG } from "./lib/configStore";
   import { applyTheme, watchSystemTheme } from "./lib/theme";
   import { toast } from "./lib/toast.svelte";
@@ -29,6 +29,7 @@
   let ambientAvailable = $state(false);
   let lastSyncTime = $state<Date | null>(null);
   let showTopology = $state(false);
+  let thunderboltPorts = $state<ThunderboltPort[]>([]);
   let _alsCleanup: (() => void) | null = null;
 
   // Sidebar active view
@@ -103,6 +104,13 @@
       const { invoke } = await import("@tauri-apps/api/core");
       displays = await invoke<DisplayInfo[]>("scan_monitors");
       toast.success(t("toast.scan_complete", displays.length));
+      // Load Thunderbolt/USB4 topology
+      try {
+        const tbJson = await invoke<string>("get_thunderbolt_topology");
+        thunderboltPorts = JSON.parse(tbJson) as ThunderboltPort[];
+      } catch {
+        thunderboltPorts = [];
+      }
     } catch (e: any) {
       error = e?.message ?? String(e);
       toast.error(t("toast.error", error));
@@ -549,7 +557,7 @@
 
       {:else if activeView === "topology"}
         {#if displays.length > 0}
-          <TopologyView {displays} />
+          <TopologyView {displays} {thunderboltPorts} />
         {:else}
           <div class="empty-state">
             <p>{t("status.no_displays")}</p>

@@ -85,7 +85,7 @@
 
   <!-- Version -->
   <div class="status-item version">
-    <span class="status-text">v2.17.0</span>
+    <span class="status-text">v2.19.0</span>
   </div>
 </footer>
 

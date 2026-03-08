@@ -82,6 +82,13 @@ typedef int (*DSSetBrightness_fn)(CGDirectDisplayID display, float brightness);
 static DSGetBrightness_fn g_DSGetBrightness = nullptr;
 static DSSetBrightness_fn g_DSSetBrightness = nullptr;
 
+// CoreDisplay private APIs for HDR control
+typedef bool (*CoreDisplay_IsHDRModeEnabled_fn)(CGDirectDisplayID display);
+typedef void (*CoreDisplay_SetHDRModeEnabled_fn)(CGDirectDisplayID display, bool enabled);
+
+static CoreDisplay_IsHDRModeEnabled_fn g_IsHDRModeEnabled = nullptr;
+static CoreDisplay_SetHDRModeEnabled_fn g_SetHDRModeEnabled = nullptr;
+
 static bool g_private_apis_resolved = false;
 
 static void resolve_private_apis() {
@@ -99,6 +106,12 @@ static void resolve_private_apis() {
     if (ds) {
         g_DSGetBrightness = (DSGetBrightness_fn)dlsym(ds, "DisplayServicesGetBrightness");
         g_DSSetBrightness = (DSSetBrightness_fn)dlsym(ds, "DisplayServicesSetBrightness");
+    }
+
+    void *cd = dlopen("/System/Library/Frameworks/CoreDisplay.framework/CoreDisplay", RTLD_LAZY);
+    if (cd) {
+        g_IsHDRModeEnabled = (CoreDisplay_IsHDRModeEnabled_fn)dlsym(cd, "CoreDisplay_Display_IsHDRModeEnabled");
+        g_SetHDRModeEnabled = (CoreDisplay_SetHDRModeEnabled_fn)dlsym(cd, "CoreDisplay_Display_SetHDRModeEnabled");
     }
 }
 
@@ -1152,6 +1165,36 @@ public:
         return ddc_read(did, 0x60);
     }
 
+    bool get_hdr_enabled(DisplayInfo& display) override {
+        resolve_private_apis();
+        if (!g_IsHDRModeEnabled) return false;
+
+        auto idx = find_display_index(display);
+        if (idx < 0 || idx >= (int)display_ids_.size()) return false;
+
+        CGDirectDisplayID did = display_ids_[idx];
+        return g_IsHDRModeEnabled(did);
+    }
+
+    bool set_hdr(DisplayInfo& display, bool enabled) override {
+        resolve_private_apis();
+        if (!g_SetHDRModeEnabled) return false;
+
+        auto idx = find_display_index(display);
+        if (idx < 0 || idx >= (int)display_ids_.size()) return false;
+
+        if (!display.supports_hdr) return false;
+
+        CGDirectDisplayID did = display_ids_[idx];
+        g_SetHDRModeEnabled(did, enabled);
+        // Verify the change took effect
+        if (g_IsHDRModeEnabled) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            return g_IsHDRModeEnabled(did) == enabled;
+        }
+        return true;
+    }
+
     void close() override {
         displays_.clear();
         display_ids_.clear();
@@ -1175,6 +1218,167 @@ private:
 
 std::unique_ptr<DisplayDetector> create_detector() {
     return std::make_unique<MacDisplayDetector>();
+}
+
+// ─── Thunderbolt / USB4 Topology ────────────────────────────────────────────
+
+std::string get_thunderbolt_topology_json() {
+    std::string json = "[";
+    bool first = true;
+
+    // Query IORegistry for Thunderbolt/USB4 devices
+    io_iterator_t iter = 0;
+    kern_return_t kr;
+
+    // Try IOThunderboltPort first (Thunderbolt 3/4 and USB4)
+    kr = IOServiceGetMatchingServices(kIOMainPortDefault,
+        IOServiceMatching("IOThunderboltPort"), &iter);
+
+    if (kr != KERN_SUCCESS || iter == 0) {
+        // Fallback: try IOThunderboltController
+        kr = IOServiceGetMatchingServices(kIOMainPortDefault,
+            IOServiceMatching("IOThunderboltController"), &iter);
+    }
+
+    if (kr == KERN_SUCCESS && iter != 0) {
+        io_service_t service;
+        while ((service = IOIteratorNext(iter)) != 0) {
+            if (!first) json += ",";
+            first = false;
+            json += "{";
+
+            // Device name
+            io_name_t name;
+            IORegistryEntryGetName(service, name);
+            json += "\"name\":\"" + std::string(name) + "\"";
+
+            // Class name
+            io_name_t className;
+            IOObjectGetClass(service, className);
+            json += ",\"type\":\"" + std::string(className) + "\"";
+
+            // Properties: look for useful attributes
+            CFMutableDictionaryRef props = nullptr;
+            if (IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS && props) {
+                // Link speed
+                CFNumberRef speed = (CFNumberRef)CFDictionaryGetValue(props, CFSTR("Link Speed"));
+                if (speed) {
+                    int64_t val = 0;
+                    CFNumberGetValue(speed, kCFNumberSInt64Type, &val);
+                    json += ",\"link_speed\":" + std::to_string(val);
+                }
+
+                // Link width
+                CFNumberRef width = (CFNumberRef)CFDictionaryGetValue(props, CFSTR("Link Width"));
+                if (width) {
+                    int64_t val = 0;
+                    CFNumberGetValue(width, kCFNumberSInt64Type, &val);
+                    json += ",\"link_width\":" + std::to_string(val);
+                }
+
+                // Port number
+                CFNumberRef portNum = (CFNumberRef)CFDictionaryGetValue(props, CFSTR("Port Number"));
+                if (portNum) {
+                    int64_t val = 0;
+                    CFNumberGetValue(portNum, kCFNumberSInt64Type, &val);
+                    json += ",\"port_number\":" + std::to_string(val);
+                }
+
+                // Thunderbolt version
+                CFNumberRef tbVersion = (CFNumberRef)CFDictionaryGetValue(props, CFSTR("ThunderboltVersion"));
+                if (tbVersion) {
+                    int64_t val = 0;
+                    CFNumberGetValue(tbVersion, kCFNumberSInt64Type, &val);
+                    json += ",\"thunderbolt_version\":" + std::to_string(val);
+                }
+
+                // UID
+                CFNumberRef uid = (CFNumberRef)CFDictionaryGetValue(props, CFSTR("UID"));
+                if (uid) {
+                    int64_t val = 0;
+                    CFNumberGetValue(uid, kCFNumberSInt64Type, &val);
+                    json += ",\"uid\":" + std::to_string(val);
+                }
+
+                CFRelease(props);
+            }
+
+            // Walk children for connected devices
+            io_iterator_t childIter = 0;
+            if (IORegistryEntryGetChildIterator(service, kIOServicePlane, &childIter) == KERN_SUCCESS) {
+                json += ",\"devices\":[";
+                bool firstChild = true;
+                io_service_t child;
+                while ((child = IOIteratorNext(childIter)) != 0) {
+                    io_name_t childName, childClass;
+                    IORegistryEntryGetName(child, childName);
+                    IOObjectGetClass(child, childClass);
+
+                    if (!firstChild) json += ",";
+                    firstChild = false;
+
+                    json += "{\"name\":\"" + std::string(childName) + "\"";
+                    json += ",\"type\":\"" + std::string(childClass) + "\"";
+
+                    // Get child properties
+                    CFMutableDictionaryRef childProps = nullptr;
+                    if (IORegistryEntryCreateCFProperties(child, &childProps, kCFAllocatorDefault, 0) == KERN_SUCCESS && childProps) {
+                        CFStringRef vendor = (CFStringRef)CFDictionaryGetValue(childProps, CFSTR("Vendor Name"));
+                        if (vendor && CFGetTypeID(vendor) == CFStringGetTypeID()) {
+                            json += ",\"vendor\":\"" + cfstring_to_string(vendor) + "\"";
+                        }
+                        CFStringRef model = (CFStringRef)CFDictionaryGetValue(childProps, CFSTR("Device Model"));
+                        if (model && CFGetTypeID(model) == CFStringGetTypeID()) {
+                            json += ",\"model\":\"" + cfstring_to_string(model) + "\"";
+                        }
+                        CFRelease(childProps);
+                    }
+                    json += "}";
+                    IOObjectRelease(child);
+                }
+                json += "]";
+                IOObjectRelease(childIter);
+            }
+
+            json += "}";
+            IOObjectRelease(service);
+        }
+        IOObjectRelease(iter);
+    }
+
+    // Also query for USB4 routers (macOS 12+)
+    iter = 0;
+    kr = IOServiceGetMatchingServices(kIOMainPortDefault,
+        IOServiceMatching("AppleUSB4Router"), &iter);
+    if (kr == KERN_SUCCESS && iter != 0) {
+        io_service_t service;
+        while ((service = IOIteratorNext(iter)) != 0) {
+            if (!first) json += ",";
+            first = false;
+            json += "{";
+
+            io_name_t name;
+            IORegistryEntryGetName(service, name);
+            json += "\"name\":\"" + std::string(name) + "\"";
+            json += ",\"type\":\"USB4Router\"";
+
+            CFMutableDictionaryRef props = nullptr;
+            if (IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS && props) {
+                CFStringRef fwVer = (CFStringRef)CFDictionaryGetValue(props, CFSTR("Firmware Version"));
+                if (fwVer && CFGetTypeID(fwVer) == CFStringGetTypeID()) {
+                    json += ",\"firmware\":\"" + cfstring_to_string(fwVer) + "\"";
+                }
+                CFRelease(props);
+            }
+
+            json += "}";
+            IOObjectRelease(service);
+        }
+        IOObjectRelease(iter);
+    }
+
+    json += "]";
+    return json;
 }
 
 } // namespace displayswitch

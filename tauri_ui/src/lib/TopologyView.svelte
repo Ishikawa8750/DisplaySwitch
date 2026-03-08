@@ -4,9 +4,9 @@
   Pure SVG, fully responsive. Auto-scales to container width.
 -->
 <script lang="ts">
-  import type { DisplayInfo } from "./types";
+  import type { DisplayInfo, ThunderboltPort } from "./types";
 
-  let { displays }: { displays: DisplayInfo[] } = $props();
+  let { displays, thunderboltPorts = [] }: { displays: DisplayInfo[]; thunderboltPorts?: ThunderboltPort[] } = $props();
 
   // Container width for responsive layout
   let containerWidth = $state(600);
@@ -166,6 +166,48 @@
   </div>
 {/if}
 
+{#if thunderboltPorts.length > 0}
+  <div class="tb-section">
+    <div class="tb-header">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e0af68" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+      <span class="tb-title">Thunderbolt / USB4</span>
+    </div>
+    {#each thunderboltPorts as port}
+      <div class="tb-port">
+        <div class="tb-port-header">
+          <span class="tb-port-name">{port.name}</span>
+          <span class="tb-port-type">{port.type}</span>
+          {#if port.thunderbolt_version}
+            <span class="tb-badge">TB{port.thunderbolt_version}</span>
+          {/if}
+        </div>
+        {#if port.link_speed || port.link_width}
+          <div class="tb-port-meta">
+            {#if port.link_speed}Speed: {port.link_speed}{/if}
+            {#if port.link_width} · Width: {port.link_width}{/if}
+          </div>
+        {/if}
+        {#if port.firmware}
+          <div class="tb-port-meta">FW: {port.firmware}</div>
+        {/if}
+        {#if port.devices?.length}
+          <div class="tb-devices">
+            {#each port.devices as dev}
+              <div class="tb-device">
+                <span class="tb-dev-name">{dev.name}</span>
+                {#if dev.vendor}<span class="tb-dev-vendor">{dev.vendor}</span>{/if}
+                {#if dev.model}<span class="tb-dev-model">{dev.model}</span>{/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/each}
+  </div>
+{/if}
+
 <style>
   .topology-container {
     width: 100%;
@@ -241,4 +283,82 @@
   .conn-line:hover {
     stroke-width: 2.5;
   }
+
+  /* Thunderbolt / USB4 */
+  .tb-section {
+    margin-top: 8px;
+    border: 1px solid #232433;
+    border-radius: 6px;
+    background: #16161e;
+    padding: 12px;
+  }
+  :global(html.light) .tb-section {
+    background: #e9e9ec;
+    border-color: #c4c5ca;
+  }
+  .tb-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .tb-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0af68;
+  }
+  .tb-port {
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+  }
+  .tb-port:last-child { margin-bottom: 0; }
+  :global(html.light) .tb-port {
+    background: rgba(0,0,0,0.04);
+  }
+  .tb-port-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .tb-port-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: #c0caf5;
+  }
+  :global(html.light) .tb-port-name { color: #343b58; }
+  .tb-port-type {
+    font-size: 10px;
+    color: #565a89;
+  }
+  .tb-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(224,175,104,0.15);
+    color: #e0af68;
+  }
+  .tb-port-meta {
+    font-size: 11px;
+    color: #565a89;
+    margin-left: 2px;
+  }
+  .tb-devices {
+    margin-top: 4px;
+    padding-left: 12px;
+    border-left: 2px solid rgba(224,175,104,0.2);
+  }
+  .tb-device {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 11px;
+  }
+  .tb-dev-name { color: #a9b1d6; }
+  .tb-dev-vendor { color: #565a89; }
+  .tb-dev-model { color: #565a89; font-style: italic; }
+  :global(html.light) .tb-dev-name { color: #4c505e; }
 </style>

@@ -124,6 +124,24 @@ DS_API int ds_set_input(DsDetector* det, int display_index, int input_code);
 /** Get current input source. Returns VCP code or -1 on error. */
 DS_API int ds_get_input(DsDetector* det, int display_index);
 
+/** Check if HDR mode is currently enabled. Returns 1 if enabled, 0 if not, -1 on error. */
+DS_API int ds_get_hdr_enabled(DsDetector* det, int display_index);
+
+/** Enable or disable HDR mode. enabled=1 to enable, 0 to disable. Returns 0 on success, -1 on error. */
+DS_API int ds_set_hdr(DsDetector* det, int display_index, int enabled);
+
+/* ─── Thunderbolt / USB4 Topology ───────────────────────────────────────── */
+
+/**
+ * Get Thunderbolt/USB4 topology as JSON string.
+ * Caller MUST free the returned string with ds_free_string().
+ * Returns NULL if no Thunderbolt/USB4 devices found.
+ */
+DS_API const char* ds_get_thunderbolt_topology(void);
+
+/** Free a string returned by ds_get_thunderbolt_topology(). */
+DS_API void ds_free_string(const char* str);
+
 /* ─── Utility ───────────────────────────────────────────────────────────── */
 
 /** Get the library version string. Do NOT free the returned pointer. */

@@ -106,6 +106,10 @@ public:
     virtual bool set_input(DisplayInfo& display, int input_code) = 0;
     virtual int  get_input(DisplayInfo& display) = 0;
 
+    /** HDR mode control */
+    virtual bool get_hdr_enabled(DisplayInfo& display) { (void)display; return false; }
+    virtual bool set_hdr(DisplayInfo& display, bool enabled) { (void)display; (void)enabled; return false; }
+
     /** Release resources */
     virtual void close() = 0;
 };
@@ -114,6 +118,11 @@ public:
  * @brief Factory: create platform detector
  */
 std::unique_ptr<DisplayDetector> create_detector();
+
+/**
+ * @brief Get Thunderbolt/USB4 topology as JSON string (macOS only)
+ */
+std::string get_thunderbolt_topology_json();
 
 /**
  * @brief GPU detection (DXGI on Windows)

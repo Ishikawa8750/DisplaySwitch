@@ -128,3 +128,24 @@ export interface AppConfig {
   // e.g. { "BNQ_0x7950": "BenQ EW3270U" }
   custom_display_names: Record<string, string>;
 }
+
+/** Thunderbolt/USB4 device info */
+export interface ThunderboltDevice {
+  name: string;
+  type: string;
+  vendor?: string;
+  model?: string;
+}
+
+/** Thunderbolt/USB4 port/controller info */
+export interface ThunderboltPort {
+  name: string;
+  type: string;
+  link_speed?: number;
+  link_width?: number;
+  port_number?: number;
+  thunderbolt_version?: number;
+  uid?: number;
+  firmware?: string;
+  devices?: ThunderboltDevice[];
+}

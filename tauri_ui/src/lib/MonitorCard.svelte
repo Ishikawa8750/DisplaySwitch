@@ -47,7 +47,7 @@
   function onBrightnessInput(val: number) {
     brightnessOverride = val;
     if (brightnessTimer) clearTimeout(brightnessTimer);
-    brightnessTimer = setTimeout(() => commitBrightness(val), 150);
+    brightnessTimer = setTimeout(() => commitBrightness(val), 30);
 
     if (overrideClearTimer) clearTimeout(overrideClearTimer);
     overrideClearTimer = setTimeout(() => {
@@ -85,6 +85,39 @@
       console.error("set_input:", e);
     }
   }
+
+  // HDR toggle
+  let hdrEnabled = $state(false);
+  let hdrLoading = $state(false);
+
+  async function loadHdrStatus() {
+    if (!display.supports_hdr) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      hdrEnabled = await invoke<boolean>("get_hdr_enabled", {
+        displayIndex: display.display_index,
+      });
+    } catch {}
+  }
+
+  async function toggleHdr() {
+    hdrLoading = true;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("set_hdr", {
+        displayIndex: display.display_index,
+        enabled: !hdrEnabled,
+      });
+      hdrEnabled = !hdrEnabled;
+    } catch (e: any) {
+      statusMsg = `⚠ HDR: ${e?.message ?? e}`;
+    }
+    hdrLoading = false;
+  }
+
+  $effect(() => {
+    loadHdrStatus();
+  });
 
   const DEFAULT_INPUT_NAMES: Record<number, string> = {
     1:  "VGA-1",
@@ -223,7 +256,7 @@
     </div>
     <div class="info">
       <h2>
-        {#if !display.is_internal && diagonalInches()}
+        {#if diagonalInches()}
           <span class="size-badge">{diagonalInches()}</span>
         {/if}
         {#if editingDisplayName}
@@ -257,6 +290,7 @@
     <div class="row">
       <span class="label">{t("card.interface")}</span>
       <span class="value accent">
+        <span class="conn-dot connected" title="Connected">●</span>
         {display.hdmi_version ?? display.connection_type}
         {#if display.hdmi_frl_rate} {display.hdmi_frl_rate}{/if}
         {#if display.refresh_rate > 0} | {display.refresh_rate.toFixed(0)} Hz{/if}
@@ -296,6 +330,15 @@
       <div class="row">
         <span class="label">{t("card.hdr")}</span>
         <span class="value hdr">{display.hdr_formats.join(", ")}</span>
+      </div>
+      <div class="row hdr-toggle-row">
+        <span class="label">HDR Mode</span>
+        <button class="hdr-toggle" class:active={hdrEnabled} class:loading={hdrLoading} onclick={toggleHdr} disabled={hdrLoading}>
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+          <span class="toggle-label">{hdrEnabled ? "ON" : "OFF"}</span>
+        </button>
       </div>
     {/if}
   </div>
@@ -524,6 +567,57 @@
   .value { font-size: 12px; color: rgba(169, 177, 214, 0.85); }
   .accent { color: #7aa2f7; }
   .hdr { color: #e0af68; }
+
+  .hdr-toggle-row {
+    align-items: center;
+  }
+  .hdr-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .hdr-toggle:disabled { opacity: 0.5; cursor: wait; }
+  .toggle-track {
+    width: 34px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    position: relative;
+    transition: background 0.2s;
+  }
+  .hdr-toggle.active .toggle-track {
+    background: #e0af68;
+  }
+  .toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .hdr-toggle.active .toggle-thumb {
+    transform: translateX(14px);
+  }
+  .toggle-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(169, 177, 214, 0.7);
+  }
+  .hdr-toggle.active .toggle-label {
+    color: #e0af68;
+  }
+
+  .conn-dot { font-size: 7px; vertical-align: middle; margin-right: 2px; }
+  .conn-dot.connected { color: #9ece6a; }
 
   .brightness {
     display: flex;

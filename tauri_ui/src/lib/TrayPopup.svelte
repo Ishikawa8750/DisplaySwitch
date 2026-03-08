@@ -61,8 +61,11 @@
       const size = diagonalInches(d);
       return size ? `${size} ${custom}` : custom;
     }
-    if (d.is_internal) return d.name || "Built-in Display";
     const size = diagonalInches(d);
+    if (d.is_internal) {
+      const name = d.name || "Built-in Display";
+      return size ? `${size} ${name}` : name;
+    }
     const name = d.name && d.name !== "Unknown Display" ? d.name : "";
     if (size && name) return `${size} ${name}`;
     if (name) return name;
@@ -85,6 +88,10 @@
       error = e?.message ?? String(e);
     }
     loading = false;
+    // Auto-resize after content renders
+    requestAnimationFrame(() => resizeToFit());
+    // Load HDR states
+    loadHdrStates();
   }
 
   // Brightness throttle
@@ -94,7 +101,7 @@
   function onBrightnessInput(idx: number, val: number) {
     brightnessOverrides = { ...brightnessOverrides, [idx]: val };
     if (brightnessTimers[idx]) clearTimeout(brightnessTimers[idx]);
-    brightnessTimers[idx] = setTimeout(() => commitBrightness(idx, val), 80);
+    brightnessTimers[idx] = setTimeout(() => commitBrightness(idx, val), 30);
   }
 
   async function commitBrightness(idx: number, val: number) {
@@ -118,6 +125,36 @@
         displays[idx] = { ...displays[idx], current_input: confirmed };
       }
     } catch {}
+  }
+
+  // HDR toggle
+  let hdrStates: Record<number, boolean> = $state({});
+  let hdrLoading: Record<number, boolean> = $state({});
+
+  async function loadHdrStates() {
+    if (!isTauri()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    for (let i = 0; i < displays.length; i++) {
+      if (displays[i].supports_hdr) {
+        try {
+          hdrStates[i] = await invoke<boolean>("get_hdr_enabled", { displayIndex: i });
+        } catch {}
+      }
+    }
+    hdrStates = { ...hdrStates };
+  }
+
+  async function toggleHdr(idx: number) {
+    hdrLoading = { ...hdrLoading, [idx]: true };
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("set_hdr", {
+        displayIndex: idx,
+        enabled: !hdrStates[idx],
+      });
+      hdrStates = { ...hdrStates, [idx]: !hdrStates[idx] };
+    } catch {}
+    hdrLoading = { ...hdrLoading, [idx]: false };
   }
 
   function getBrightness(idx: number): number {
@@ -236,6 +273,19 @@
     } catch {}
   }
 
+  // Auto-resize popup to fit content
+  async function resizeToFit() {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      const popup = document.querySelector('.popup') as HTMLElement;
+      if (popup) {
+        const height = Math.min(popup.scrollHeight + 8, 600);
+        await win.setSize(new (await import("@tauri-apps/api/dpi")).LogicalSize(320, height));
+      }
+    } catch {}
+  }
+
   // Auto-hide popup on blur
   async function handleBlur() {
     try {
@@ -315,8 +365,8 @@
               {/if}
               <span class="display-meta">
                 {d.resolution_str}{d.refresh_rate > 0 ? ` · ${d.refresh_rate.toFixed(0)}Hz` : ""}
-                {#if !d.is_internal && d.connection_type && d.connection_type !== "External"}
-                   · {d.connection_type}
+                {#if d.connection_type && d.connection_type !== "External"}
+                   · <span class="conn-indicator">●</span> {d.connection_type}
                 {/if}
               </span>
             </div>
@@ -342,6 +392,17 @@
                 </div>
                 <span class="slider-value">{getBrightness(idx)}%</span>
               </div>
+            </div>
+          {/if}
+
+          <!-- HDR Toggle -->
+          {#if d.supports_hdr}
+            <div class="hdr-section">
+              <span class="hdr-label">HDR</span>
+              <span class="hdr-formats">{d.hdr_formats?.join(", ") || ""}</span>
+              <button class="hdr-btn" class:active={hdrStates[idx]} disabled={hdrLoading[idx]} onclick={() => toggleHdr(idx)}>
+                {hdrStates[idx] ? "ON" : "OFF"}
+              </button>
             </div>
           {/if}
 
@@ -432,6 +493,12 @@
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    height: auto;
+  }
+
+  :global(html) {
+    background: transparent;
+    height: auto;
   }
 
   .popup {
@@ -447,6 +514,10 @@
     backdrop-filter: blur(60px) saturate(180%);
     -webkit-backdrop-filter: blur(60px) saturate(180%);
     min-height: 60px;
+    max-height: calc(100vh - 8px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
   }
 
   .loading {
@@ -529,6 +600,12 @@
     font-size: 11px;
     color: rgba(255, 255, 255, 0.45);
     letter-spacing: -0.01em;
+  }
+
+  .conn-indicator {
+    color: #30d158;
+    font-size: 7px;
+    vertical-align: middle;
   }
 
   /* Brightness */
@@ -617,6 +694,48 @@
   /* Input Sources */
   .input-section {
     margin-top: 2px;
+  }
+
+  /* HDR */
+  .hdr-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 4px 0;
+  }
+  .hdr-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e0af68;
+  }
+  .hdr-formats {
+    flex: 1;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+  }
+  .hdr-btn {
+    padding: 3px 10px;
+    border: none;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+    transition: all 0.15s;
+  }
+  .hdr-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+  .hdr-btn.active {
+    background: rgba(224, 175, 104, 0.25);
+    color: #e0af68;
+  }
+  .hdr-btn:disabled {
+    opacity: 0.4;
+    cursor: wait;
   }
 
   .input-grid {

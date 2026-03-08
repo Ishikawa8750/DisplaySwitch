@@ -222,6 +222,10 @@ struct NativeCore {
     fn_get_brightness: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
     fn_set_input: unsafe extern "C" fn(*mut c_void, c_int, c_int) -> c_int,
     fn_get_input: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
+    fn_get_hdr_enabled: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
+    fn_set_hdr: unsafe extern "C" fn(*mut c_void, c_int, c_int) -> c_int,
+    fn_get_thunderbolt_topology: unsafe extern "C" fn() -> *const c_char,
+    fn_free_string: unsafe extern "C" fn(*const c_char),
     fn_last_error: unsafe extern "C" fn() -> *const c_char,
     fn_destroy: unsafe extern "C" fn(*mut c_void),
 }
@@ -287,6 +291,18 @@ impl NativeCore {
             let fn_get_inp = *lib
                 .get::<unsafe extern "C" fn(*mut c_void, c_int) -> c_int>(b"ds_get_input")
                 .map_err(|e| format!("{}", e))?;
+            let fn_get_hdr = *lib
+                .get::<unsafe extern "C" fn(*mut c_void, c_int) -> c_int>(b"ds_get_hdr_enabled")
+                .map_err(|e| format!("{}", e))?;
+            let fn_set_hdr = *lib
+                .get::<unsafe extern "C" fn(*mut c_void, c_int, c_int) -> c_int>(b"ds_set_hdr")
+                .map_err(|e| format!("{}", e))?;
+            let fn_get_tb = *lib
+                .get::<unsafe extern "C" fn() -> *const c_char>(b"ds_get_thunderbolt_topology")
+                .map_err(|e| format!("{}", e))?;
+            let fn_free_str = *lib
+                .get::<unsafe extern "C" fn(*const c_char)>(b"ds_free_string")
+                .map_err(|e| format!("{}", e))?;
             let fn_err = *lib
                 .get::<unsafe extern "C" fn() -> *const c_char>(b"ds_last_error")
                 .map_err(|e| format!("{}", e))?;
@@ -305,6 +321,10 @@ impl NativeCore {
                 fn_get_brightness: fn_get_bri,
                 fn_set_input: fn_inp,
                 fn_get_input: fn_get_inp,
+                fn_get_hdr_enabled: fn_get_hdr,
+                fn_set_hdr,
+                fn_get_thunderbolt_topology: fn_get_tb,
+                fn_free_string: fn_free_str,
                 fn_last_error: fn_err,
                 fn_destroy,
             })
@@ -445,6 +465,34 @@ impl NativeCore {
     fn get_input(&self, idx: i32) -> i32 {
         unsafe { (self.fn_get_input)(self.detector, idx) }
     }
+
+    fn get_hdr_enabled(&self, idx: i32) -> i32 {
+        unsafe { (self.fn_get_hdr_enabled)(self.detector, idx) }
+    }
+
+    fn set_hdr(&self, idx: i32, enabled: bool) -> Result<(), String> {
+        unsafe {
+            let rc = (self.fn_set_hdr)(self.detector, idx, if enabled { 1 } else { 0 });
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err("HDR toggle failed (unsupported or API unavailable)".to_string())
+            }
+        }
+    }
+
+    fn get_thunderbolt_topology(&self) -> Option<String> {
+        unsafe {
+            let ptr = (self.fn_get_thunderbolt_topology)();
+            if ptr.is_null() {
+                None
+            } else {
+                let s = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+                (self.fn_free_string)(ptr);
+                Some(s)
+            }
+        }
+    }
 }
 
 impl Drop for NativeCore {
@@ -550,6 +598,42 @@ fn get_input(
     })) {
         Ok(val) => Ok(val),
         Err(_) => Ok(-1),
+    }
+}
+
+/// Get HDR enabled status for a display.
+#[tauri::command]
+fn get_hdr_enabled(
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
+    display_index: i32,
+) -> Result<bool, String> {
+    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let core = guard.core.as_ref().ok_or("Native core not available")?;
+    Ok(core.get_hdr_enabled(display_index) == 1)
+}
+
+/// Toggle HDR mode for a display.
+#[tauri::command]
+fn set_hdr(
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
+    display_index: i32,
+    enabled: bool,
+) -> Result<(), String> {
+    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let core = guard.core.as_ref().ok_or("Native core not available")?;
+    core.set_hdr(display_index, enabled)
+}
+
+/// Get Thunderbolt/USB4 topology info as JSON.
+#[tauri::command]
+fn get_thunderbolt_topology(
+    state: tauri::State<'_, Mutex<NativeCoreState>>,
+) -> Result<String, String> {
+    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let core = guard.core.as_ref().ok_or("Native core not available")?;
+    match core.get_thunderbolt_topology() {
+        Some(json) => Ok(json),
+        None => Ok("[]".to_string()),
     }
 }
 
@@ -1033,6 +1117,9 @@ fn main() {
             set_input,
             get_brightness,
             get_input,
+            get_hdr_enabled,
+            set_hdr,
+            get_thunderbolt_topology,
             register_hotkeys,
             unregister_all_hotkeys,
             get_ambient_light,
@@ -1119,7 +1206,7 @@ fn main() {
                     tauri::WebviewUrl::App("index.html".into()),
                 )
                 .title("DisplaySwitch")
-                .inner_size(320.0, 420.0)
+                .inner_size(320.0, 520.0)
                 .decorations(false)
                 .resizable(false)
                 .skip_taskbar(true)
