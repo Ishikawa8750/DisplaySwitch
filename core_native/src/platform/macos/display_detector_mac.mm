@@ -61,15 +61,20 @@ static std::string manufacturer_from_id(uint32_t vendor) {
 
 // ─── Private API resolution (Apple Silicon DDC/CI + DisplayServices brightness) ──
 
-typedef IOReturn (*IOAVServiceWriteI2C_fn)(io_service_t service, uint32_t chipAddress,
+// IOAVService APIs use an opaque CFTypeRef (IOAVServiceRef) on Apple Silicon,
+// not a raw io_service_t. IOAVServiceCreateWithService wraps the io_service_t.
+typedef IOReturn (*IOAVServiceWriteI2C_fn)(CFTypeRef avService, uint32_t chipAddress,
                                             uint32_t dataAddress, void *inputBuffer,
                                             uint32_t inputBufferSize);
-typedef IOReturn (*IOAVServiceReadI2C_fn)(io_service_t service, uint32_t chipAddress,
+typedef IOReturn (*IOAVServiceReadI2C_fn)(CFTypeRef avService, uint32_t chipAddress,
                                            uint32_t dataAddress, void *outputBuffer,
                                            uint32_t outputBufferSize);
+typedef CFTypeRef (*IOAVServiceCreateWithService_fn)(CFAllocatorRef allocator,
+                                                      io_service_t service);
 
 static IOAVServiceWriteI2C_fn g_IOAVServiceWriteI2C = nullptr;
 static IOAVServiceReadI2C_fn g_IOAVServiceReadI2C = nullptr;
+static IOAVServiceCreateWithService_fn g_IOAVServiceCreateWithService = nullptr;
 
 typedef int (*DSGetBrightness_fn)(CGDirectDisplayID display, float *brightness);
 typedef int (*DSSetBrightness_fn)(CGDirectDisplayID display, float brightness);
@@ -87,6 +92,7 @@ static void resolve_private_apis() {
     if (iokit) {
         g_IOAVServiceWriteI2C = (IOAVServiceWriteI2C_fn)dlsym(iokit, "IOAVServiceWriteI2C");
         g_IOAVServiceReadI2C = (IOAVServiceReadI2C_fn)dlsym(iokit, "IOAVServiceReadI2C");
+        g_IOAVServiceCreateWithService = (IOAVServiceCreateWithService_fn)dlsym(iokit, "IOAVServiceCreateWithService");
     }
 
     void *ds = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY);
@@ -98,7 +104,8 @@ static void resolve_private_apis() {
 
 static bool avservice_available() {
     resolve_private_apis();
-    return g_IOAVServiceWriteI2C != nullptr && g_IOAVServiceReadI2C != nullptr;
+    return g_IOAVServiceWriteI2C != nullptr && g_IOAVServiceReadI2C != nullptr
+           && g_IOAVServiceCreateWithService != nullptr;
 }
 
 // ─── EDID reading via IOKit ─────────────────────────────────────────────────
@@ -106,57 +113,99 @@ static bool avservice_available() {
 static std::vector<uint8_t> get_edid_for_display(CGDirectDisplayID displayID) {
     std::vector<uint8_t> result;
 
-    // Get IOKit service port for this display
+    // Method 1: Try CGDisplayIOServicePort (deprecated but works on Intel)
     io_service_t service = CGDisplayIOServicePort(displayID);
-    if (service == MACH_PORT_NULL || service == 0) {
-        // CGDisplayIOServicePort is deprecated; try IOKit enumeration
-        CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
-        io_iterator_t iter;
-        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) != KERN_SUCCESS)
+    if (service != MACH_PORT_NULL && service != 0) {
+        CFDataRef edidData = (CFDataRef)IORegistryEntryCreateCFProperty(
+            service, CFSTR(kIODisplayEDIDKey), kCFAllocatorDefault, 0);
+        if (edidData) {
+            const UInt8* bytes = CFDataGetBytePtr(edidData);
+            CFIndex length = CFDataGetLength(edidData);
+            result.assign(bytes, bytes + length);
+            CFRelease(edidData);
             return result;
-
-        io_service_t serv;
-        uint32_t targetVendor = CGDisplayVendorNumber(displayID);
-        uint32_t targetModel  = CGDisplayModelNumber(displayID);
-
-        while ((serv = IOIteratorNext(iter)) != 0) {
-            CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(serv, kIODisplayOnlyPreferredName);
-            if (infoDict) {
-                CFNumberRef vendorRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayVendorID));
-                CFNumberRef productRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayProductID));
-
-                uint32_t vendor = 0, product = 0;
-                if (vendorRef) CFNumberGetValue(vendorRef, kCFNumberIntType, &vendor);
-                if (productRef) CFNumberGetValue(productRef, kCFNumberIntType, &product);
-
-                if (vendor == targetVendor && product == targetModel) {
-                    // Found matching display - get EDID
-                    CFDataRef edidData = (CFDataRef)IORegistryEntryCreateCFProperty(serv, CFSTR(kIODisplayEDIDKey), kCFAllocatorDefault, 0);
-                    if (edidData) {
-                        const UInt8* bytes = CFDataGetBytePtr(edidData);
-                        CFIndex length = CFDataGetLength(edidData);
-                        result.assign(bytes, bytes + length);
-                        CFRelease(edidData);
-                    }
-                    CFRelease(infoDict);
-                    IOObjectRelease(serv);
-                    break;
-                }
-                CFRelease(infoDict);
-            }
-            IOObjectRelease(serv);
         }
-        IOObjectRelease(iter);
-        return result;
     }
 
-    // Direct service port available
-    CFDataRef edidData = (CFDataRef)IORegistryEntryCreateCFProperty(service, CFSTR(kIODisplayEDIDKey), kCFAllocatorDefault, 0);
-    if (edidData) {
-        const UInt8* bytes = CFDataGetBytePtr(edidData);
-        CFIndex length = CFDataGetLength(edidData);
-        result.assign(bytes, bytes + length);
-        CFRelease(edidData);
+    uint32_t targetVendor = CGDisplayVendorNumber(displayID);
+    uint32_t targetModel  = CGDisplayModelNumber(displayID);
+
+    // Method 2: Try IODisplayConnect (Intel Macs)
+    {
+        CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
+        io_iterator_t iter;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
+            io_service_t serv;
+            while ((serv = IOIteratorNext(iter)) != 0) {
+                CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(
+                    serv, kIODisplayOnlyPreferredName);
+                if (infoDict) {
+                    CFNumberRef vendorRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayVendorID));
+                    CFNumberRef productRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayProductID));
+                    uint32_t vendor = 0, product = 0;
+                    if (vendorRef) CFNumberGetValue(vendorRef, kCFNumberIntType, &vendor);
+                    if (productRef) CFNumberGetValue(productRef, kCFNumberIntType, &product);
+                    if (vendor == targetVendor && product == targetModel) {
+                        CFDataRef edidData = (CFDataRef)IORegistryEntryCreateCFProperty(
+                            serv, CFSTR(kIODisplayEDIDKey), kCFAllocatorDefault, 0);
+                        if (edidData) {
+                            const UInt8* bytes = CFDataGetBytePtr(edidData);
+                            CFIndex length = CFDataGetLength(edidData);
+                            result.assign(bytes, bytes + length);
+                            CFRelease(edidData);
+                        }
+                        CFRelease(infoDict);
+                        IOObjectRelease(serv);
+                        break;
+                    }
+                    CFRelease(infoDict);
+                }
+                IOObjectRelease(serv);
+            }
+            IOObjectRelease(iter);
+            if (!result.empty()) return result;
+        }
+    }
+
+    // Method 3: Apple Silicon — search IOMobileFramebufferShim subtrees for EDID
+    // Match by DisplayAttributes.ProductAttributes.LegacyManufacturerID
+    {
+        CFMutableDictionaryRef matching = IOServiceMatching("IOMobileFramebufferShim");
+        io_iterator_t iter;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
+            io_service_t serv;
+            while ((serv = IOIteratorNext(iter)) != 0) {
+                CFTypeRef attrs = IORegistryEntryCreateCFProperty(
+                    serv, CFSTR("DisplayAttributes"), kCFAllocatorDefault, 0);
+                if (attrs && CFGetTypeID(attrs) == CFDictionaryGetTypeID()) {
+                    CFDictionaryRef prodAttrs = (CFDictionaryRef)CFDictionaryGetValue(
+                        (CFDictionaryRef)attrs, CFSTR("ProductAttributes"));
+                    if (prodAttrs && CFGetTypeID(prodAttrs) == CFDictionaryGetTypeID()) {
+                        CFNumberRef mfrRef = (CFNumberRef)CFDictionaryGetValue(
+                            prodAttrs, CFSTR("LegacyManufacturerID"));
+                        int mfr = 0;
+                        if (mfrRef) CFNumberGetValue(mfrRef, kCFNumberIntType, &mfr);
+                        if ((uint32_t)mfr == targetVendor) {
+                            // Found matching framebuffer — search subtree for EDID
+                            CFTypeRef edid = IORegistryEntrySearchCFProperty(
+                                serv, kIOServicePlane, CFSTR("EDID"),
+                                kCFAllocatorDefault, kIORegistryIterateRecursively);
+                            if (edid && CFGetTypeID(edid) == CFDataGetTypeID()) {
+                                const UInt8* bytes = CFDataGetBytePtr((CFDataRef)edid);
+                                CFIndex length = CFDataGetLength((CFDataRef)edid);
+                                result.assign(bytes, bytes + length);
+                                CFRelease(edid);
+                            }
+                            if (edid && CFGetTypeID(edid) != CFDataGetTypeID()) CFRelease(edid);
+                        }
+                    }
+                }
+                if (attrs) CFRelease(attrs);
+                IOObjectRelease(serv);
+                if (!result.empty()) break;
+            }
+            IOObjectRelease(iter);
+        }
     }
 
     return result;
@@ -165,49 +214,95 @@ static std::vector<uint8_t> get_edid_for_display(CGDirectDisplayID displayID) {
 // ─── Display name from IOKit ────────────────────────────────────────────────
 
 static std::string get_display_name(CGDirectDisplayID displayID) {
-    // Try IOKit display info dictionary
-    CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
-    io_iterator_t iter;
-    if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) != KERN_SUCCESS)
-        return "Unknown Display";
-
-    io_service_t serv;
     uint32_t targetVendor = CGDisplayVendorNumber(displayID);
     uint32_t targetModel  = CGDisplayModelNumber(displayID);
 
-    std::string name;
-    while ((serv = IOIteratorNext(iter)) != 0) {
-        CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(serv, kIODisplayOnlyPreferredName);
-        if (infoDict) {
-            CFNumberRef vendorRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayVendorID));
-            CFNumberRef productRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayProductID));
+    // Method 1: IODisplayConnect (Intel Macs)
+    {
+        CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
+        io_iterator_t iter;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
+            io_service_t serv;
+            while ((serv = IOIteratorNext(iter)) != 0) {
+                CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(
+                    serv, kIODisplayOnlyPreferredName);
+                if (infoDict) {
+                    CFNumberRef vendorRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayVendorID));
+                    CFNumberRef productRef = (CFNumberRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayProductID));
+                    uint32_t vendor = 0, product = 0;
+                    if (vendorRef) CFNumberGetValue(vendorRef, kCFNumberIntType, &vendor);
+                    if (productRef) CFNumberGetValue(productRef, kCFNumberIntType, &product);
+                    if (vendor == targetVendor && product == targetModel) {
+                        CFDictionaryRef names = (CFDictionaryRef)CFDictionaryGetValue(
+                            infoDict, CFSTR(kDisplayProductName));
+                        if (names && CFDictionaryGetCount(names) > 0) {
+                            CFIndex count = CFDictionaryGetCount(names);
+                            std::vector<const void*> keys(count), values(count);
+                            CFDictionaryGetKeysAndValues(names, keys.data(), values.data());
+                            std::string name = cfstring_to_string((CFStringRef)values[0]);
+                            if (!name.empty()) {
+                                CFRelease(infoDict);
+                                IOObjectRelease(serv);
+                                IOObjectRelease(iter);
+                                return name;
+                            }
+                        }
+                        CFRelease(infoDict);
+                        IOObjectRelease(serv);
+                        break;
+                    }
+                    CFRelease(infoDict);
+                }
+                IOObjectRelease(serv);
+            }
+            IOObjectRelease(iter);
+        }
+    }
 
-            uint32_t vendor = 0, product = 0;
-            if (vendorRef) CFNumberGetValue(vendorRef, kCFNumberIntType, &vendor);
-            if (productRef) CFNumberGetValue(productRef, kCFNumberIntType, &product);
-
-            if (vendor == targetVendor && product == targetModel) {
-                // Get localized name
-                CFDictionaryRef names = (CFDictionaryRef)CFDictionaryGetValue(infoDict, CFSTR(kDisplayProductName));
-                if (names && CFDictionaryGetCount(names) > 0) {
-                    CFIndex count = CFDictionaryGetCount(names);
-                    std::vector<const void*> keys(count), values(count);
-                    CFDictionaryGetKeysAndValues(names, keys.data(), values.data());
-                    if (count > 0) {
-                        name = cfstring_to_string((CFStringRef)values[0]);
+    // Method 2: Apple Silicon — search IOMobileFramebufferShim subtree for ProductName
+    {
+        CFMutableDictionaryRef matching = IOServiceMatching("IOMobileFramebufferShim");
+        io_iterator_t iter;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
+            io_service_t serv;
+            while ((serv = IOIteratorNext(iter)) != 0) {
+                CFTypeRef attrs = IORegistryEntryCreateCFProperty(
+                    serv, CFSTR("DisplayAttributes"), kCFAllocatorDefault, 0);
+                if (attrs && CFGetTypeID(attrs) == CFDictionaryGetTypeID()) {
+                    CFDictionaryRef prodAttrs = (CFDictionaryRef)CFDictionaryGetValue(
+                        (CFDictionaryRef)attrs, CFSTR("ProductAttributes"));
+                    if (prodAttrs && CFGetTypeID(prodAttrs) == CFDictionaryGetTypeID()) {
+                        CFNumberRef mfrRef = (CFNumberRef)CFDictionaryGetValue(
+                            prodAttrs, CFSTR("LegacyManufacturerID"));
+                        int mfr = 0;
+                        if (mfrRef) CFNumberGetValue(mfrRef, kCFNumberIntType, &mfr);
+                        if ((uint32_t)mfr == targetVendor) {
+                            // Search subtree for ProductName
+                            CFTypeRef pn = IORegistryEntrySearchCFProperty(
+                                serv, kIOServicePlane, CFSTR("ProductName"),
+                                kCFAllocatorDefault, kIORegistryIterateRecursively);
+                            if (pn && CFGetTypeID(pn) == CFStringGetTypeID()) {
+                                std::string name = cfstring_to_string((CFStringRef)pn);
+                                CFRelease(pn);
+                                if (!name.empty()) {
+                                    CFRelease(attrs);
+                                    IOObjectRelease(serv);
+                                    IOObjectRelease(iter);
+                                    return name;
+                                }
+                            }
+                            if (pn) CFRelease(pn);
+                        }
                     }
                 }
-                CFRelease(infoDict);
+                if (attrs) CFRelease(attrs);
                 IOObjectRelease(serv);
-                break;
             }
-            CFRelease(infoDict);
+            IOObjectRelease(iter);
         }
-        IOObjectRelease(serv);
     }
-    IOObjectRelease(iter);
 
-    return name.empty() ? "Unknown Display" : name;
+    return "Unknown Display";
 }
 
 // ─── Connection type detection ──────────────────────────────────────────────────────
@@ -219,19 +314,110 @@ static bool str_contains_ci(const std::string& str, const std::string& sub) {
     return it != str.end();
 }
 
+static std::string parse_transport_description(const std::string& transport) {
+    // Parse strings like "Port-USB-C@2/DisplayPort", "HDMI", "DisplayPort", etc.
+    if (str_contains_ci(transport, "HDMI")) return "HDMI";
+    if (str_contains_ci(transport, "DisplayPort") || str_contains_ci(transport, "/DP"))
+        return "DisplayPort";
+    if (str_contains_ci(transport, "Thunderbolt")) return "Thunderbolt";
+    if (str_contains_ci(transport, "USB-C") || str_contains_ci(transport, "USB_C"))
+        return "USB-C";
+    if (str_contains_ci(transport, "DVI")) return "DVI";
+    if (str_contains_ci(transport, "VGA")) return "VGA";
+    return "";
+}
+
 static std::string detect_connection_type(CGDirectDisplayID displayID, bool is_internal) {
     if (is_internal) return "Internal LCD";
 
     uint32_t targetVendor = CGDisplayVendorNumber(displayID);
     uint32_t targetModel  = CGDisplayModelNumber(displayID);
 
-    // Method 1: Find matching IODisplayConnect and walk IOKit parent tree
-    io_service_t displayService = 0;
+    // Method 1: Apple Silicon — IOMobileFramebufferShim subtree properties
+    {
+        CFMutableDictionaryRef matching = IOServiceMatching("IOMobileFramebufferShim");
+        io_iterator_t iter;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
+            io_service_t serv;
+            while ((serv = IOIteratorNext(iter)) != 0) {
+                CFTypeRef attrs = IORegistryEntryCreateCFProperty(
+                    serv, CFSTR("DisplayAttributes"), kCFAllocatorDefault, 0);
+                if (attrs && CFGetTypeID(attrs) == CFDictionaryGetTypeID()) {
+                    CFDictionaryRef prodAttrs = (CFDictionaryRef)CFDictionaryGetValue(
+                        (CFDictionaryRef)attrs, CFSTR("ProductAttributes"));
+                    if (prodAttrs && CFGetTypeID(prodAttrs) == CFDictionaryGetTypeID()) {
+                        CFNumberRef mfrRef = (CFNumberRef)CFDictionaryGetValue(
+                            prodAttrs, CFSTR("LegacyManufacturerID"));
+                        int mfr = 0;
+                        if (mfrRef) CFNumberGetValue(mfrRef, kCFNumberIntType, &mfr);
+                        if ((uint32_t)mfr == targetVendor) {
+                            // Try TransportDescription (e.g. "Port-USB-C@2/DisplayPort")
+                            CFTypeRef td = IORegistryEntrySearchCFProperty(
+                                serv, kIOServicePlane, CFSTR("TransportDescription"),
+                                kCFAllocatorDefault, kIORegistryIterateRecursively);
+                            if (td && CFGetTypeID(td) == CFStringGetTypeID()) {
+                                std::string transport = cfstring_to_string((CFStringRef)td);
+                                CFRelease(td);
+                                std::string result = parse_transport_description(transport);
+                                if (!result.empty()) {
+                                    CFRelease(attrs);
+                                    IOObjectRelease(serv);
+                                    IOObjectRelease(iter);
+                                    return result;
+                                }
+                            }
+                            if (td) CFRelease(td);
+
+                            // Try DFP Type Description (e.g. "DP", "HDMI")
+                            CFTypeRef dfp = IORegistryEntrySearchCFProperty(
+                                serv, kIOServicePlane, CFSTR("DFP Type Description"),
+                                kCFAllocatorDefault, kIORegistryIterateRecursively);
+                            if (dfp && CFGetTypeID(dfp) == CFStringGetTypeID()) {
+                                std::string dfpStr = cfstring_to_string((CFStringRef)dfp);
+                                CFRelease(dfp);
+                                std::string result = parse_transport_description(dfpStr);
+                                if (!result.empty()) {
+                                    CFRelease(attrs);
+                                    IOObjectRelease(serv);
+                                    IOObjectRelease(iter);
+                                    return result;
+                                }
+                            }
+                            if (dfp) CFRelease(dfp);
+
+                            // Try ParentBuiltInPortTypeDescription (e.g. "USB-C")
+                            CFTypeRef pbt = IORegistryEntrySearchCFProperty(
+                                serv, kIOServicePlane, CFSTR("ParentBuiltInPortTypeDescription"),
+                                kCFAllocatorDefault, kIORegistryIterateRecursively);
+                            if (pbt && CFGetTypeID(pbt) == CFStringGetTypeID()) {
+                                std::string pbtStr = cfstring_to_string((CFStringRef)pbt);
+                                CFRelease(pbt);
+                                std::string result = parse_transport_description(pbtStr);
+                                if (!result.empty()) {
+                                    CFRelease(attrs);
+                                    IOObjectRelease(serv);
+                                    IOObjectRelease(iter);
+                                    return result;
+                                }
+                            }
+                            if (pbt) CFRelease(pbt);
+                        }
+                    }
+                }
+                if (attrs) CFRelease(attrs);
+                IOObjectRelease(serv);
+            }
+            IOObjectRelease(iter);
+        }
+    }
+
+    // Method 2: IODisplayConnect parent tree walk (Intel Macs)
     {
         CFMutableDictionaryRef matching = IOServiceMatching("IODisplayConnect");
         io_iterator_t iter;
         if (IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS) {
             io_service_t serv;
+            io_service_t displayService = 0;
             while ((serv = IOIteratorNext(iter)) != 0) {
                 CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(
                     serv, kIODisplayOnlyPreferredName);
@@ -252,91 +438,93 @@ static std::string detect_connection_type(CGDirectDisplayID displayID, bool is_i
                 IOObjectRelease(serv);
             }
             IOObjectRelease(iter);
-        }
-    }
 
-    if (displayService) {
-        io_service_t current = displayService;
-        std::string result;
-        for (int depth = 0; depth < 12 && result.empty(); ++depth) {
-            io_name_t className, ioName;
-            IOObjectGetClass(current, className);
-            IORegistryEntryGetName(current, ioName);
-            std::string cls(className), nameStr(ioName);
+            if (displayService) {
+                io_service_t current = displayService;
+                std::string result;
+                for (int depth = 0; depth < 12 && result.empty(); ++depth) {
+                    io_name_t className, ioName;
+                    IOObjectGetClass(current, className);
+                    IORegistryEntryGetName(current, ioName);
+                    std::string cls(className), nameStr(ioName);
 
-            if (str_contains_ci(cls, "HDMI") || str_contains_ci(nameStr, "HDMI"))
-                { result = "HDMI"; break; }
-            if ((str_contains_ci(cls, "DisplayPort") || str_contains_ci(nameStr, "DisplayPort"))
-                && cls != "IODisplayConnect")
-                { result = "DisplayPort"; break; }
-            if (str_contains_ci(cls, "Thunderbolt") || str_contains_ci(nameStr, "Thunderbolt"))
-                { result = "Thunderbolt"; break; }
-            if (str_contains_ci(cls, "TypeC") || str_contains_ci(nameStr, "TypeC"))
-                { result = "USB-C"; break; }
-            if (str_contains_ci(cls, "DVI") || str_contains_ci(nameStr, "DVI"))
-                { result = "DVI"; break; }
+                    if (str_contains_ci(cls, "HDMI") || str_contains_ci(nameStr, "HDMI"))
+                        { result = "HDMI"; break; }
+                    if ((str_contains_ci(cls, "DisplayPort") || str_contains_ci(nameStr, "DisplayPort"))
+                        && cls != "IODisplayConnect")
+                        { result = "DisplayPort"; break; }
+                    if (str_contains_ci(cls, "Thunderbolt") || str_contains_ci(nameStr, "Thunderbolt"))
+                        { result = "Thunderbolt"; break; }
+                    if (str_contains_ci(cls, "TypeC") || str_contains_ci(nameStr, "TypeC"))
+                        { result = "USB-C"; break; }
+                    if (str_contains_ci(cls, "DVI") || str_contains_ci(nameStr, "DVI"))
+                        { result = "DVI"; break; }
 
-            // Check "connector-type" property (Apple GPU kext)
-            CFTypeRef connProp = IORegistryEntryCreateCFProperty(
-                current, CFSTR("connector-type"), kCFAllocatorDefault, 0);
-            if (connProp) {
-                if (CFGetTypeID(connProp) == CFDataGetTypeID()) {
-                    CFDataRef data = (CFDataRef)connProp;
-                    if (CFDataGetLength(data) >= 4) {
-                        const UInt8* bytes = CFDataGetBytePtr(data);
-                        uint32_t ct = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
-                        switch (ct) {
-                            case 0x02: result = "VGA"; break;
-                            case 0x04: result = "DVI"; break;
-                            case 0x0A: result = "DisplayPort"; break;
-                            case 0x0B: result = "HDMI"; break;
+                    CFTypeRef connProp = IORegistryEntryCreateCFProperty(
+                        current, CFSTR("connector-type"), kCFAllocatorDefault, 0);
+                    if (connProp) {
+                        if (CFGetTypeID(connProp) == CFDataGetTypeID()) {
+                            CFDataRef data = (CFDataRef)connProp;
+                            if (CFDataGetLength(data) >= 4) {
+                                const UInt8* bytes = CFDataGetBytePtr(data);
+                                uint32_t ct = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+                                switch (ct) {
+                                    case 0x02: result = "VGA"; break;
+                                    case 0x04: result = "DVI"; break;
+                                    case 0x0A: result = "DisplayPort"; break;
+                                    case 0x0B: result = "HDMI"; break;
+                                }
+                            }
+                        } else if (CFGetTypeID(connProp) == CFStringGetTypeID()) {
+                            std::string ct = cfstring_to_string((CFStringRef)connProp);
+                            if (str_contains_ci(ct, "HDMI")) result = "HDMI";
+                            else if (str_contains_ci(ct, "DisplayPort") || str_contains_ci(ct, "DP"))
+                                result = "DisplayPort";
+                            else if (!ct.empty()) result = ct;
                         }
+                        CFRelease(connProp);
                     }
-                } else if (CFGetTypeID(connProp) == CFStringGetTypeID()) {
-                    std::string ct = cfstring_to_string((CFStringRef)connProp);
-                    if (str_contains_ci(ct, "HDMI")) result = "HDMI";
-                    else if (str_contains_ci(ct, "DisplayPort") || str_contains_ci(ct, "DP"))
-                        result = "DisplayPort";
-                    else if (!ct.empty()) result = ct;
+
+                    if (!result.empty()) break;
+
+                    io_service_t parent = 0;
+                    if (IORegistryEntryGetParentEntry(current, kIOServicePlane, &parent) != KERN_SUCCESS)
+                        break;
+                    if (current != displayService) IOObjectRelease(current);
+                    current = parent;
                 }
-                CFRelease(connProp);
+                if (current != displayService) IOObjectRelease(current);
+                IOObjectRelease(displayService);
+                if (!result.empty()) return result;
             }
-
-            if (!result.empty()) break;
-
-            io_service_t parent = 0;
-            if (IORegistryEntryGetParentEntry(current, kIOServicePlane, &parent) != KERN_SUCCESS)
-                break;
-            IOObjectRelease(current);
-            current = parent;
         }
-        IOObjectRelease(current);
-        if (!result.empty()) return result;
     }
 
-    // Method 2: Try deprecated CGDisplayIOServicePort (Intel fallback)
-    io_service_t service = CGDisplayIOServicePort(displayID);
-    if (service != MACH_PORT_NULL && service != 0) {
-        io_service_t parent = 0;
-        kern_return_t kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
-        if (kr == KERN_SUCCESS && parent) {
-            CFTypeRef connectionType = IORegistryEntryCreateCFProperty(
-                parent, CFSTR("ConnectionType"), kCFAllocatorDefault, 0);
-            if (connectionType) {
-                if (CFGetTypeID(connectionType) == CFStringGetTypeID()) {
-                    std::string ct = cfstring_to_string((CFStringRef)connectionType);
+    // Method 3: Try deprecated CGDisplayIOServicePort (Intel fallback)
+    {
+        io_service_t service = CGDisplayIOServicePort(displayID);
+        if (service != MACH_PORT_NULL && service != 0) {
+            io_service_t parent = 0;
+            kern_return_t kr = IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent);
+            if (kr == KERN_SUCCESS && parent) {
+                CFTypeRef connectionType = IORegistryEntryCreateCFProperty(
+                    parent, CFSTR("ConnectionType"), kCFAllocatorDefault, 0);
+                if (connectionType) {
+                    if (CFGetTypeID(connectionType) == CFStringGetTypeID()) {
+                        std::string ct = cfstring_to_string((CFStringRef)connectionType);
+                        CFRelease(connectionType);
+                        IOObjectRelease(parent);
+                        if (str_contains_ci(ct, "HDMI")) return "HDMI";
+                        if (str_contains_ci(ct, "DisplayPort") || str_contains_ci(ct, "DP"))
+                            return "DisplayPort";
+                        if (str_contains_ci(ct, "USB")) return "USB-C";
+                        if (str_contains_ci(ct, "Thunderbolt")) return "Thunderbolt";
+                        return ct;
+                    }
                     CFRelease(connectionType);
-                    IOObjectRelease(parent);
-                    if (str_contains_ci(ct, "HDMI")) return "HDMI";
-                    if (str_contains_ci(ct, "DisplayPort") || str_contains_ci(ct, "DP"))
-                        return "DisplayPort";
-                    if (str_contains_ci(ct, "USB")) return "USB-C";
-                    if (str_contains_ci(ct, "Thunderbolt")) return "Thunderbolt";
-                    return ct;
                 }
-                CFRelease(connectionType);
+                IOObjectRelease(parent);
             }
-            IOObjectRelease(parent);
         }
     }
 
@@ -406,6 +594,7 @@ static float get_display_brightness(CGDirectDisplayID displayID) {
 static io_service_t find_avservice_for_display(CGDirectDisplayID displayID) {
     if (!avservice_available()) return 0;
 
+    bool is_builtin = CGDisplayIsBuiltin(displayID);
     uint32_t targetVendor = CGDisplayVendorNumber(displayID);
     uint32_t targetModel  = CGDisplayModelNumber(displayID);
 
@@ -415,11 +604,35 @@ static io_service_t find_avservice_for_display(CGDirectDisplayID displayID) {
         return 0;
 
     io_service_t serv;
+    io_service_t fallback = 0; // First external proxy as fallback
     while ((serv = IOIteratorNext(iter)) != 0) {
-        bool matched = false;
+        // Method 1: Apple Silicon — match by Location property
+        CFTypeRef locProp = IORegistryEntryCreateCFProperty(
+            serv, CFSTR("Location"), kCFAllocatorDefault, 0);
+        if (locProp && CFGetTypeID(locProp) == CFStringGetTypeID()) {
+            std::string location = cfstring_to_string((CFStringRef)locProp);
+            CFRelease(locProp);
+
+            if (is_builtin && str_contains_ci(location, "Embedded")) {
+                // Internal display — skip, DDC not used for internal
+                IOObjectRelease(serv);
+                continue;
+            }
+            if (!is_builtin && str_contains_ci(location, "External")) {
+                if (!fallback) {
+                    IOObjectRetain(serv);
+                    fallback = serv;
+                }
+            }
+        } else {
+            if (locProp) CFRelease(locProp);
+        }
+
+        // Method 2: Intel fallback — match by IODisplayConnect child vendor/model
         io_iterator_t childIter;
         if (IORegistryEntryGetChildIterator(serv, kIOServicePlane, &childIter) == KERN_SUCCESS) {
             io_service_t child;
+            bool matched = false;
             while ((child = IOIteratorNext(childIter)) != 0) {
                 CFDictionaryRef infoDict = (CFDictionaryRef)IODisplayCreateInfoDictionary(
                     child, kIODisplayOnlyPreferredName);
@@ -438,16 +651,28 @@ static io_service_t find_avservice_for_display(CGDirectDisplayID displayID) {
                 if (matched) break;
             }
             IOObjectRelease(childIter);
+            if (matched) {
+                if (fallback) IOObjectRelease(fallback);
+                IOObjectRelease(iter);
+                return serv;
+            }
         }
-        if (matched) { IOObjectRelease(iter); return serv; }
+
         IOObjectRelease(serv);
     }
     IOObjectRelease(iter);
-    return 0;
+
+    // Return the Location-matched fallback (Apple Silicon path)
+    return fallback;
 }
 
 static bool avservice_ddc_write(io_service_t service, uint8_t command, uint16_t value) {
-    if (!g_IOAVServiceWriteI2C) return false;
+    if (!g_IOAVServiceWriteI2C || !g_IOAVServiceCreateWithService) return false;
+
+    // Create IOAVServiceRef from io_service_t
+    CFTypeRef avServiceRef = g_IOAVServiceCreateWithService(kCFAllocatorDefault, service);
+    if (!avServiceRef) return false;
+
     uint8_t data[6];
     data[0] = 0x84;
     data[1] = 0x03;
@@ -457,11 +682,19 @@ static bool avservice_ddc_write(io_service_t service, uint8_t command, uint16_t 
     uint8_t checksum = 0x6E ^ 0x51;
     for (int i = 0; i < 5; i++) checksum ^= data[i];
     data[5] = checksum;
-    return g_IOAVServiceWriteI2C(service, 0x37, 0x51, data, 6) == KERN_SUCCESS;
+    bool ok = g_IOAVServiceWriteI2C(avServiceRef, 0x37, 0x51, data, 6) == KERN_SUCCESS;
+    CFRelease(avServiceRef);
+    return ok;
 }
 
 static int avservice_ddc_read(io_service_t service, uint8_t command) {
-    if (!g_IOAVServiceWriteI2C || !g_IOAVServiceReadI2C) return -1;
+    if (!g_IOAVServiceWriteI2C || !g_IOAVServiceReadI2C || !g_IOAVServiceCreateWithService)
+        return -1;
+
+    // Create IOAVServiceRef from io_service_t
+    CFTypeRef avServiceRef = g_IOAVServiceCreateWithService(kCFAllocatorDefault, service);
+    if (!avServiceRef) return -1;
+
     uint8_t send[4];
     send[0] = 0x82;
     send[1] = 0x01;
@@ -469,10 +702,18 @@ static int avservice_ddc_read(io_service_t service, uint8_t command) {
     uint8_t checksum = 0x6E ^ 0x51;
     for (int i = 0; i < 3; i++) checksum ^= send[i];
     send[3] = checksum;
-    if (g_IOAVServiceWriteI2C(service, 0x37, 0x51, send, 4) != KERN_SUCCESS) return -1;
+    if (g_IOAVServiceWriteI2C(avServiceRef, 0x37, 0x51, send, 4) != KERN_SUCCESS) {
+        CFRelease(avServiceRef);
+        return -1;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(40));
     uint8_t reply[11] = {};
-    if (g_IOAVServiceReadI2C(service, 0x37, 0x51, reply, 11) != KERN_SUCCESS) return -1;
+    if (g_IOAVServiceReadI2C(avServiceRef, 0x37, 0x51, reply, 11) != KERN_SUCCESS) {
+        CFRelease(avServiceRef);
+        return -1;
+    }
+    CFRelease(avServiceRef);
+
     // Parse reply - scan for Get VCP Feature Reply opcode (0x02)
     for (int i = 2; i < 8; i++) {
         if (reply[i] == 0x02 && i + 5 < 11)

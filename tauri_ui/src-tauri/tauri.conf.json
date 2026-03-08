@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicbarker/clay/main/tauri.schema.json",
   "productName": "DisplaySwitch",
-  "version": "2.14.0",
+  "version": "2.15.0",
   "identifier": "com.displayswitch.app",
   "build": {
     "frontendDist": "../dist",
