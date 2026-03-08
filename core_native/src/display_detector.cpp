@@ -57,3 +57,14 @@ BandwidthInfo calculate_bandwidth(const std::string& connection_type,
 }
 
 } // namespace displayswitch
+
+namespace displayswitch {
+
+#if !defined(__APPLE__)
+std::string get_thunderbolt_topology_json() {
+    // Thunderbolt/USB4 topology enumeration is currently implemented on macOS only.
+    return "[]";
+}
+#endif
+
+} // namespace displayswitch
