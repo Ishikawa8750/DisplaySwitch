@@ -491,7 +491,7 @@
   :global(body) {
     margin: 0;
     padding: 4px;
-    background: transparent;
+    background: transparent !important;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -499,27 +499,36 @@
   }
 
   :global(html) {
-    background: transparent;
+    background: transparent !important;
     height: auto;
   }
 
+  :global(#app) {
+    background: transparent !important;
+  }
+
   .popup {
-    background: rgba(30, 30, 30, 0.78);
-    border: 0.5px solid rgba(255, 255, 255, 0.12);
+    background: linear-gradient(
+      145deg,
+      rgba(42, 42, 46, 0.88) 0%,
+      rgba(28, 28, 30, 0.92) 100%
+    );
+    border: 0.5px solid rgba(255, 255, 255, 0.14);
     border-radius: 14px;
     padding: 14px;
     color: #fff;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.3),
-      0 10px 40px rgba(0, 0, 0, 0.55),
-      0 2px 12px rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(60px) saturate(180%);
-    -webkit-backdrop-filter: blur(60px) saturate(180%);
+    box-shadow: 
+      0 0 0 1px rgba(0, 0, 0, 0.15) inset,
+      0 20px 50px -12px rgba(0, 0, 0, 0.65),
+      0 8px 20px -6px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(80px) saturate(200%);
+    -webkit-backdrop-filter: blur(80px) saturate(200%);
     min-height: 60px;
     max-height: calc(100vh - 8px);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    isolation: isolate;
   }
 
   .loading {

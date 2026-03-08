@@ -1,9 +1,9 @@
 # DisplaySwitch Universal - 实施路线图
 
-> **最后更新**: Phase 7 UI增强 + 高级功能完成  
+> **最后更新**: Phase 7 完成 — macOS 透明托盘弹窗 + 重命名对话框 + 全平台 CI/CD  
 > **Python版本**: ✅ 完成 → `python_version/`  
-> **C++ 核心**: ✅ 编译通过 + 5/5 测试通过 + FFI DLL + WMI 亮度 → `core_native/`  
-> **Tauri 前端**: ✅ C++ FFI 直连 + 系统托盘 + 热插拔 + 亮度同步 + 全局热键 + 自启动 + 配置持久化 + 主题/i18n/场景/ALS/拓扑/更新 → `tauri_ui/`
+> **C++ 核心**: ✅ 编译通过 + 5/5 测试通过 + FFI DLL + WMI 亮度 + Thunderbolt拓扑 → `core_native/`  
+> **Tauri 前端**: ✅ C++ FFI 直连 + 系统托盘 + 热插拔 + 亮度同步 + 全局热键 + 自启动 + 配置持久化 + 主题/i18n/场景/ALS/拓扑/更新 + macOS透明弹窗 + 重命名UI → `tauri_ui/`
 
 ---
 
@@ -344,6 +344,47 @@ tauri_ui/
     ├── src/main.rs                   # +get_ambient_light/check_for_update commands
     ├── tauri.conf.json               # +plugins.updater 端点配置
     └── capabilities/default.json     # +updater:default
+```
+
+#### 7.8 macOS 透明托盘弹窗 + 重命名对话框（✅ Phase 7c）
+
+- **macOS 托盘弹窗完全透明** — 消除矩形背景框
+  - 启用 `macos-private-api` feature → `wry/transparent` 透明支持
+  - `.transparent(true)` + `.shadow(false)` + `.background_color(0,0,0,0)`
+  - ObjC 运行时强制透明: `objc2` + `objc2-app-kit` + `objc2-foundation`
+    - NSWindow: `setOpaque(false)`, `setBackgroundColor(clearColor)`, `setHasShadow(false)`
+    - WKWebView: `setValue(false, forKey:"drawsBackground")`
+  - CSS 优化: 渐变背景 + 增强 backdrop-filter + `isolation:isolate`
+- **RenameDialog 子窗口** — 取代双击重命名
+  - 模态覆盖层设计，支持显示器名称和多输入源重命名
+  - 单独 Reset 按钮 + "Reset All" 批量重置
+  - 铅笔图标按钮触发（MonitorCard header）
+  - ESC/点击遮罩关闭，Save/Cancel 操作
+- **全局右键菜单禁用** — `document.addEventListener("contextmenu")`
+- **HDMI 映射校正** — 17→HDMI-1, 18→HDMI-2 (BenQ EW3270U DDC 实测)
+- **Thunderbolt 拓扑枚举** (非 macOS 平台兜底实现)
+  - `get_thunderbolt_topology_json()` Windows/Linux 返回空数组
+  - macOS 使用 IORegistry 查询 IOThunderboltPort/Controller
+
+**新增/修改文件**:
+
+```text
+tauri_ui/
+├── src/
+│   ├── main.ts                       # +全局 contextmenu 阻止
+│   └── lib/
+│       ├── MonitorCard.svelte        # +RenameDialog 集成 + 铅笔按钮
+│       ├── TrayPopup.svelte          # +宽度 320→328, body padding 4px, 移除 oncontextmenu
+│       └── RenameDialog.svelte       # NEW: 重命名模态对话框
+└── src-tauri/
+    ├── Cargo.toml                    # +macos-private-api, objc2, objc2-app-kit, objc2-foundation
+    ├── tauri.conf.json               # +macOSPrivateApi: true
+    ├── src/main.rs                   # +with_webview ObjC 代码, 弹窗透明设置
+    └── icons/tray_menubar.png        # NEW: macOS 菜单栏图标
+
+core_native/
+└── src/
+    └── display_detector.cpp          # +#if !defined(__APPLE__) get_thunderbolt_topology_json() 兜底
 ```
 
 ### Phase 8: 未来计划（待开始）

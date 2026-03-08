@@ -21,7 +21,7 @@
 | **Display Detection** | CCD API + Registry EDID + CEA-861 parsing (HDMI VSDB / HF-VSDB / HDR metadata) |
 | **Brightness Control** | DDC/CI VCP 0x10 for external monitors, WMI for laptop internal displays |
 | **Input Switching** | DDC/CI VCP 0x60 with full input enumeration (VGA / DVI / DP / HDMI / USB-C) |
-| **Custom Input Names** | Double-click to rename input sources per monitor, persistently stored |
+| **Custom Input Names** | Rename input sources via RenameDialog modal, persistently stored per monitor |
 | **GPU Info** | WMI-based detection — model, VRAM, driver version |
 | **Hot-Plug** | Real-time display connect / disconnect via `WM_DISPLAYCHANGE` + `WM_DEVICECHANGE` |
 | **Topology View** | Adaptive SVG visualization: GPU → connection → display with bandwidth info |
@@ -33,7 +33,9 @@
 | **i18n** | English + 中文, auto-detect system locale |
 | **Auto-Start** | Launch on system boot (Windows Registry / macOS LaunchAgent) |
 | **Auto-Update** | GitHub Releases update check via `tauri-plugin-updater` |
-| **System Tray** | Minimize to tray, tray menu, double-click restore |
+| **System Tray** | Minimize to tray, tray menu, click to restore |
+| **macOS Transparent Popup** | Native macOS private API for fully transparent tray popup (no background rectangle) |
+| **Rename Dialog** | Modal UI for renaming displays and input sources with individual reset buttons |
 
 ## Architecture
 
@@ -103,6 +105,7 @@ DisplaySwitch/
 │   │       ├── TitleBar.svelte
 │   │       ├── StatusBar.svelte
 │   │       ├── ProfileBar.svelte
+│   │       ├── RenameDialog.svelte
 │   │       ├── configStore.ts
 │   │       ├── i18n.ts
 │   │       ├── theme.ts
