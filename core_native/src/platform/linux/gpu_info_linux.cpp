@@ -8,6 +8,7 @@
 
 #include "displayswitch/display_detector.h"
 
+#include <cstdio>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>

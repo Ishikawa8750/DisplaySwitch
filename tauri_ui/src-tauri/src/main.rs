@@ -542,21 +542,17 @@ fn set_input(
     display_index: i32,
     input_code: i32,
 ) -> Result<i32, String> {
-    // Step 1: send the set_input command (hold lock briefly)
+    // Send the set_input command
     {
         let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
         let core = guard.core.as_ref().ok_or("Native core not available")?;
         core.set_input(display_index, input_code)?;
-    } // <-- mutex released here
+    }
 
-    // Step 2: wait outside the lock so other commands aren't blocked
-    std::thread::sleep(std::time::Duration::from_millis(300));
-
-    // Step 3: re-acquire lock to read back the confirmed input
-    let guard = state.lock().map_err(|e| format!("Lock: {}", e))?;
-    let core = guard.core.as_ref().ok_or("Native core not available")?;
-    let confirmed = core.get_input(display_index);
-    Ok(confirmed)
+    // Trust the input_code we sent — many monitors have unreliable VCP 0x60
+    // readback (they may return a stale or incorrect value even after a
+    // successful switch).
+    Ok(input_code)
 }
 
 /// Get brightness for a single display without full rescan (fast path).

@@ -32,6 +32,11 @@
   let thunderboltPorts = $state<ThunderboltPort[]>([]);
   let _alsCleanup: (() => void) | null = null;
 
+  // Track per-display last manual input switch time to suppress unreliable
+  // VCP 0x60 readback during sync for a cooldown period.
+  let lastInputSetTime: Record<number, number> = {};
+  const INPUT_SYNC_COOLDOWN_MS = 15_000;
+
   // Sidebar active view
   let activeView = $state<"monitors" | "topology" | "profiles">("monitors");
 
@@ -129,9 +134,15 @@
           displays[i] = { ...displays[i], brightness: bri };
         }
         if (!displays[i]?.is_internal) {
-          const inp = await invoke<number>("get_input", { displayIndex: i });
-          if (inp >= 0 && displays[i]) {
-            displays[i] = { ...displays[i], current_input: inp };
+          // Skip input sync if a manual switch was made recently —
+          // some monitors return stale/incorrect VCP 0x60 readback
+          const cooldownActive = lastInputSetTime[i] &&
+            (Date.now() - lastInputSetTime[i] < INPUT_SYNC_COOLDOWN_MS);
+          if (!cooldownActive) {
+            const inp = await invoke<number>("get_input", { displayIndex: i });
+            if (inp >= 0 && displays[i]) {
+              displays[i] = { ...displays[i], current_input: inp };
+            }
           }
         }
       }
@@ -179,6 +190,7 @@
             inputCode: act.input_code,
           });
           if (confirmed >= 0 && displays[act.display_index]) {
+            lastInputSetTime[act.display_index] = Date.now();
             displays[act.display_index] = {
               ...displays[act.display_index],
               current_input: confirmed,
@@ -536,6 +548,9 @@
               customInputNames={appConfig.custom_input_names[displayId(display)] ?? undefined}
               customDisplayName={appConfig.custom_display_names?.[displayId(display)] ?? null}
               onchange={(updates) => {
+                if ('current_input' in updates) {
+                  lastInputSetTime[i] = Date.now();
+                }
                 displays[i] = { ...displays[i], ...updates };
               }}
               onInputNameChange={(code, name) => handleInputNameChange(display, code, name)}

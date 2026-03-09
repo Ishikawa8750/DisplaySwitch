@@ -14,6 +14,7 @@
 #include "displayswitch/display_detector.h"
 #include "displayswitch/edid_parser.h"
 
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -155,7 +156,9 @@ static std::string connector_type_str(uint32_t type) {
         case DRM_MODE_CONNECTOR_DisplayPort: return "DisplayPort";
         case DRM_MODE_CONNECTOR_eDP:       return "Internal LCD";
         case DRM_MODE_CONNECTOR_LVDS:      return "LVDS";
+#ifdef DRM_MODE_CONNECTOR_USB
         case DRM_MODE_CONNECTOR_USB:       return "USB-C";
+#endif
         default:                           return "Unknown";
     }
 }
@@ -163,7 +166,10 @@ static std::string connector_type_str(uint32_t type) {
 static bool is_internal_connector(uint32_t type) {
     return type == DRM_MODE_CONNECTOR_eDP ||
            type == DRM_MODE_CONNECTOR_LVDS ||
-           type == DRM_MODE_CONNECTOR_DSI;
+#ifdef DRM_MODE_CONNECTOR_DSI
+           type == DRM_MODE_CONNECTOR_DSI ||
+#endif
+           false;
 }
 
 // ─── Find I2C bus number for a DRM connector ──────────────────────────
