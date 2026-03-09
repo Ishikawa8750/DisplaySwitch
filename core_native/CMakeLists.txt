@@ -1,9 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
-project(DisplaySwitchNative VERSION 2.0.0 LANGUAGES CXX OBJCXX)
+
+if(APPLE)
+    project(DisplaySwitchNative VERSION 2.0.0 LANGUAGES CXX OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 20)
+else()
+    project(DisplaySwitchNative VERSION 2.0.0 LANGUAGES CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OBJCXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
@@ -36,6 +41,12 @@ elseif(APPLE)
         src/platform/macos/display_detector_mac.mm
         src/platform/macos/gpu_info_mac.mm
         src/platform/macos/vcp_controller_mac.mm
+    )
+elseif(UNIX)
+    list(APPEND SOURCES
+        src/platform/linux/display_detector_linux.cpp
+        src/platform/linux/gpu_info_linux.cpp
+        src/platform/linux/vcp_controller_linux.cpp
     )
 endif()
 
@@ -71,6 +82,11 @@ elseif(APPLE)
         ${COREGRAPHICS_LIBRARY}
         ${FOUNDATION_LIBRARY}
     )
+elseif(UNIX)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBDRM REQUIRED libdrm)
+    target_include_directories(displayswitch_core PRIVATE ${LIBDRM_INCLUDE_DIRS})
+    target_link_libraries(displayswitch_core PRIVATE ${LIBDRM_LIBRARIES})
 endif()
 
 # ─── Shared DLL with C API (for Rust FFI / external consumers) ───────────
@@ -107,6 +123,9 @@ if(BUILD_SHARED_DLL)
             ${COREGRAPHICS_LIBRARY}
             ${FOUNDATION_LIBRARY}
         )
+    elseif(UNIX)
+        target_include_directories(displayswitch_ffi PRIVATE ${LIBDRM_INCLUDE_DIRS})
+        target_link_libraries(displayswitch_ffi PRIVATE ${LIBDRM_LIBRARIES})
     endif()
 
     # Copy shared library to tauri_ui/src-tauri for easy Rust access

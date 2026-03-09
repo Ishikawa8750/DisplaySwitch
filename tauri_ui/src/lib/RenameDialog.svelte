@@ -28,8 +28,11 @@
   let editValues = $state<Record<number, string>>({});
   let displayNameValue = $state("");
 
-  // Initialize values
+  // Initialize values ONCE on mount (untrack to prevent re-runs when parent state changes)
+  let _initialized = false;
   $effect(() => {
+    if (_initialized) return;
+    _initialized = true;
     const vals: Record<number, string> = {};
     for (const code of inputCodes) {
       vals[code] = getInputName(code);

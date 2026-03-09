@@ -189,10 +189,88 @@ jobs:
             tauri_ui/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             tauri_ui/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
 
+  # ─── Linux Build ───
+  build-linux:
+    name: Linux Build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libdrm-dev \
+            libi2c-dev \
+            pkg-config \
+            libssl-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            javascriptcoregtk-4.1 \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: tauri_ui/src-tauri
+
+      - name: Build C++ native core (CMake)
+        run: |
+          cmake -S core_native -B core_native/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON_BINDINGS=OFF \
+            -DBUILD_TESTS=OFF
+          cmake --build core_native/build --config Release --target displayswitch_ffi
+
+      - name: Verify .so exists
+        run: |
+          if [ ! -f "tauri_ui/src-tauri/libdisplayswitch_ffi.so" ]; then
+            SO=$(find core_native/build -name "libdisplayswitch_ffi.so" -type f | head -1)
+            if [ -z "$SO" ]; then
+              echo "ERROR: libdisplayswitch_ffi.so not found!"
+              find core_native/build -type f -name "*.so" || true
+              exit 1
+            fi
+            cp "$SO" tauri_ui/src-tauri/libdisplayswitch_ffi.so
+          fi
+          echo "SO found: $(stat --printf='%s bytes' tauri_ui/src-tauri/libdisplayswitch_ffi.so)"
+          ls -la tauri_ui/src-tauri/libdisplayswitch_ffi.so
+
+      - name: Install frontend dependencies
+        working-directory: tauri_ui
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: tauri_ui
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DisplaySwitch-Linux
+          path: |
+            tauri_ui/src-tauri/target/release/bundle/deb/*.deb
+            tauri_ui/src-tauri/target/release/bundle/appimage/*.AppImage
+
   # ─── Release job: runs only on v* tags ───
   release:
     name: Create Release
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, build-linux]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -215,3 +293,5 @@ jobs:
             artifacts/**/*.msi
             artifacts/**/*.exe
             artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage

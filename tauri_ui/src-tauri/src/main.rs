@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::path::PathBuf;
 use std::sync::Mutex;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::sync::Arc;
 use tauri::{
     image::Image,
@@ -763,6 +763,34 @@ if ($sensor) {
 
 #[cfg(not(target_os = "windows"))]
 fn als_read_sensor() -> ALSStatus {
+    // Linux: Try IIO (Industrial I/O) light sensor
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(entries) = std::fs::read_dir("/sys/bus/iio/devices") {
+            for entry in entries.flatten() {
+                let name_path = entry.path().join("name");
+                if let Ok(name) = std::fs::read_to_string(&name_path) {
+                    let name = name.trim();
+                    // Common ALS sensor names
+                    if name.contains("als") || name.contains("light") || name.contains("tsl2561") || name.contains("bh1750") {
+                        let lux_path = entry.path().join("in_illuminance_raw");
+                        let lux_input = entry.path().join("in_illuminance_input");
+                        let path = if lux_input.exists() { lux_input } else { lux_path };
+                        if let Ok(val) = std::fs::read_to_string(&path) {
+                            if let Ok(lux) = val.trim().parse::<f64>() {
+                                return ALSStatus {
+                                    available: true,
+                                    lux,
+                                    recommended_brightness: lux_to_brightness(lux),
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     ALSStatus {
         available: false,
         lux: -1.0,
@@ -1078,6 +1106,67 @@ mod hotplug {
     }
 }
 
+// ─── Hot-plug detection (Linux udev / polling) ──────────────────────────
+
+#[cfg(target_os = "linux")]
+mod hotplug {
+    use tauri::{AppHandle, Emitter};
+    use std::sync::Arc;
+
+    /// Spawn a background thread that watches for DRM connector changes
+    /// by polling /sys/class/drm for changes.
+    pub fn start_display_watcher(app_handle: Arc<AppHandle>) {
+        std::thread::spawn(move || {
+            use std::fs;
+            use std::collections::HashSet;
+
+            let drm_path = "/sys/class/drm";
+            let mut prev_connectors: HashSet<String> = HashSet::new();
+
+            // Initial state
+            if let Ok(entries) = fs::read_dir(drm_path) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.contains('-') {
+                        // Check if connected
+                        let status_path = format!("{}/{}/status", drm_path, name);
+                        if let Ok(status) = fs::read_to_string(&status_path) {
+                            if status.trim() == "connected" {
+                                prev_connectors.insert(name);
+                            }
+                        }
+                    }
+                }
+            }
+
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+
+                let mut current: HashSet<String> = HashSet::new();
+                if let Ok(entries) = fs::read_dir(drm_path) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.contains('-') {
+                            let status_path = format!("{}/{}/status", drm_path, name);
+                            if let Ok(status) = fs::read_to_string(&status_path) {
+                                if status.trim() == "connected" {
+                                    current.insert(name);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if current != prev_connectors {
+                    eprintln!("[Hotplug] Display change detected (Linux)");
+                    let _ = app_handle.emit("displays-changed", "drm_poll");
+                    prev_connectors = current;
+                }
+            }
+        });
+    }
+}
+
 // ─── main ───────────────────────────────────────────────────────────────
 
 fn main() {
@@ -1192,6 +1281,14 @@ fn main() {
                         _ => {}
                     }
                 });
+            }
+
+            // ── Linux: re-enable native window decorations ──────────
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(true);
+                }
             }
 
             // ── System tray ─────────────────────────────────────────
@@ -1318,6 +1415,12 @@ fn main() {
             #[cfg(target_os = "windows")]
             {
                 let app_handle = Arc::new(app.handle().clone());
+                hotplug::start_display_watcher(app_handle);
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                let app_handle = std::sync::Arc::new(app.handle().clone());
                 hotplug::start_display_watcher(app_handle);
             }
 
